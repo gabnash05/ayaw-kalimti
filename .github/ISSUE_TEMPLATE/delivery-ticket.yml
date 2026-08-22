@@ -1,0 +1,103 @@
+name: Delivery ticket
+description: Create a traced implementation, defect, infrastructure, test, documentation, spike, decision, or security ticket.
+title: "[MVP-###] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for one deliverable unit of work. After creation, add exactly one type, primary-area, scope, risk, and priority label; add the correct milestone and Project fields. Production-deferred work must not enter the MVP milestone.
+
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: State the single observable outcome without expanding approved scope.
+    validations:
+      required: true
+
+  - type: input
+    id: requirements
+    attributes:
+      label: Requirements and acceptance criteria
+      description: Cite applicable FR, AC, PI, RULE, PRIV, SEC, or other canonical IDs.
+      placeholder: "FR-101; AC-001; PRIV-001"
+    validations:
+      required: true
+
+  - type: input
+    id: architecture
+    attributes:
+      label: Architecture sections
+      description: Cite the relevant docs/ARCHITECTURE.md sections.
+      placeholder: "Sections 3.7, 5, and 7"
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and relationships
+      description: Name the parent epic, blocking issues, and tickets blocked by this work. Use native GitHub relationships after creation.
+      placeholder: "Parent: #...; Blocked by: #...; Blocks: #...; None if not applicable."
+    validations:
+      required: true
+
+  - type: textarea
+    id: modules
+    attributes:
+      label: Expected files or modules
+      description: Identify the expected change surface without prescribing unapproved implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: tests
+    attributes:
+      label: Test and verification requirements
+      description: Include deterministic, negative, failure, authorization, privacy, device, preview, or operational evidence as applicable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and privacy considerations
+      description: State the affected boundaries and safeguards, or explain why none are affected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: done
+    attributes:
+      label: Definition of done
+      description: Provide an objective completion checklist, including required evidence.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: decision
+    attributes:
+      label: Technical decision required before implementation?
+      options:
+        - "No"
+        - "Yes — move to Needs decision and identify the unresolved decision below"
+    validations:
+      required: true
+
+  - type: textarea
+    id: decision_detail
+    attributes:
+      label: Decision detail
+      description: If a decision is required, explain the unresolved choice, impact, and owner. Otherwise enter "None."
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: scope_check
+    attributes:
+      label: Scope confirmation
+      options:
+        - label: This ticket is traceable to approved documentation and adds no unapproved product behavior.
+          required: true
+        - label: Production-only or explicitly deferred work is excluded from the MVP milestone.
+          required: true
