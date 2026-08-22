@@ -2,7 +2,7 @@
 
 ## Project and stage
 
-Ayaw Kalimti is a personal-first, context-aware Task application. The repository is still pre-implementation: product behavior, architecture boundaries, and the technology-stack baseline are approved, and no buildable application exists yet.
+Ayaw Kalimti is a personal-first, context-aware Task application. The repository has a production-track workspace foundation; product behavior, runtime services, and release readiness remain unimplemented until their traced tickets provide verified evidence.
 
 Do not claim that code, commands, deployments, migrations, tests, or release readiness exist until they are present and verified in this repository.
 
@@ -95,7 +95,14 @@ GitHub Projects is the authoritative delivery view for status, priority, ownersh
 
 ## Commands and repository-specific overrides
 
-No setup, build, lint, test, or deployment command is currently valid. Add commands only after running them successfully and documenting prerequisites.
+The verified workspace commands require Node 24.19.0 and Corepack:
+
+```powershell
+corepack npm@11.12.1 ci
+corepack npm@11.12.1 run check
+```
+
+`check` runs formatting, lint, type checking, tooling tests, and generated-artifact checks. It makes no provider call, deployment, or release action. Add later commands only after running them successfully and documenting prerequisites.
 
 When the monorepo is bootstrapped, keep this root file concise and add nested `AGENTS.md` files only where a mobile, API, database, or infrastructure subtree genuinely needs different commands or rules. The nearest applicable file should contain the specialized guidance.
 
