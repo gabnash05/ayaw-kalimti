@@ -1,0 +1,38 @@
+{
+  "name": "ayaw-kalimti",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Ayaw Kalimti production-track Android MVP workspace.",
+  "packageManager": "npm@11.12.1",
+  "engines": {
+    "node": ">=24.19.0 <25",
+    "npm": ">=11.12.1 <12"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "check": "corepack npm@11.12.1 run format:check && corepack npm@11.12.1 run lint && corepack npm@11.12.1 run typecheck && corepack npm@11.12.1 run test && corepack npm@11.12.1 run check:generated",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit --pretty false --project tsconfig.json",
+    "test": "jest --runInBand --passWithNoTests",
+    "check:generated": "node scripts/check-generated.cjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/jest": "29.5.14",
+    "@types/node": "24.10.13",
+    "eslint": "10.9.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.11.0",
+    "jest": "29.7.0",
+    "prettier": "3.9.6",
+    "drizzle-kit": "0.31.10",
+    "ts-jest": "29.4.12",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.56.1"
+  }
+}
