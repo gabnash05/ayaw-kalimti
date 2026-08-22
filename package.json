@@ -13,13 +13,14 @@
     "packages/*"
   ],
   "scripts": {
-    "check": "corepack npm@11.12.1 run format:check && corepack npm@11.12.1 run lint && corepack npm@11.12.1 run typecheck && corepack npm@11.12.1 run test && corepack npm@11.12.1 run check:generated",
+    "check": "corepack npm@11.12.1 run format:check && corepack npm@11.12.1 run lint && corepack npm@11.12.1 run typecheck && corepack npm@11.12.1 run test && corepack npm@11.12.1 run check:generated && corepack npm@11.12.1 run check:dependencies",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit --pretty false --project tsconfig.json",
     "test": "jest --runInBand --passWithNoTests",
-    "check:generated": "node scripts/check-generated.cjs"
+    "check:generated": "node scripts/check-generated.cjs",
+    "check:dependencies": "corepack npm@11.12.1 ls --all --silent"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

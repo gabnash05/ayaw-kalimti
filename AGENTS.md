@@ -102,7 +102,7 @@ corepack npm@11.12.1 ci
 corepack npm@11.12.1 run check
 ```
 
-`check` runs formatting, lint, type checking, tooling tests, and generated-artifact checks. It makes no provider call, deployment, or release action. Add later commands only after running them successfully and documenting prerequisites.
+`check` runs formatting, lint, type checking, tooling tests, generated-artifact checks, and dependency-tree validation. It makes no provider call, deployment, or release action. Add later commands only after running them successfully and documenting prerequisites.
 
 When the monorepo is bootstrapped, keep this root file concise and add nested `AGENTS.md` files only where a mobile, API, database, or infrastructure subtree genuinely needs different commands or rules. The nearest applicable file should contain the specialized guidance.
 

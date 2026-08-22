@@ -22,4 +22,4 @@ corepack npm@11.12.1 ci
 corepack npm@11.12.1 run check
 ```
 
-`check` verifies formatting, linting, type checking, Jest foundations, and the generated-code drift hook. It makes no provider calls and does not provision, deploy, or release anything.
+`check` verifies formatting, linting, type checking, Jest foundations, generated-code drift, and dependency-tree validity. It makes no provider calls and does not provision, deploy, or release anything.
