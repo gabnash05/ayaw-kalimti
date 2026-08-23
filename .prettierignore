@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+.expo/
+package-lock.json
+docs/
+.github/ISSUE_TEMPLATE/
+.github/PULL_REQUEST_TEMPLATE.md

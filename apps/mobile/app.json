@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "Ayaw Kalimti",
+    "slug": "ayaw-kalimti",
+    "version": "0.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "plugins": ["expo-router"]
+  }
+}

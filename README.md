@@ -4,7 +4,7 @@ Ayaw Kalimti is a personal-first, context-aware task application intended to sur
 
 ## Status
 
-The product baseline, domain glossary, production-track architecture, and technology stack are approved. Application code has not yet been bootstrapped; implementation and release approval remain separate.
+The product baseline, domain glossary, production-track architecture, and technology stack are approved. The production-track workspace is bootstrapped; application behavior and release approval remain separate.
 
 ## Documentation
 
@@ -15,4 +15,11 @@ The product baseline, domain glossary, production-track architecture, and techno
 
 ## Development
 
-There are no setup, build, test, or deployment commands yet. Add them here when the application workspace is created and the commands are verified.
+Requires Node 24.19.0 and Corepack. The pinned package manager is npm 11.12.1.
+
+```powershell
+corepack npm@11.12.1 ci
+corepack npm@11.12.1 run check
+```
+
+`check` verifies formatting, linting, type checking, Jest foundations, generated-code drift, and dependency-tree validity. It makes no provider calls and does not provision, deploy, or release anything.

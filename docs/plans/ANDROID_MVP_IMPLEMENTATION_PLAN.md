@@ -45,7 +45,7 @@ These require Product Spec change control with affected IDs and acceptance updat
 
 | ID | Decision/evidence | Must close before | Resolution artifact |
 |---|---|---|---|
-| TD-001 | Reverify exact Expo/React Native/Android SDK, Node, npm, Supabase CLI, Postgres, NestJS, Drizzle, Terraform, and provider versions. | MVP-002 | Lockfiles/config plus bootstrap evidence; Architecture §8 permits this. |
+| TD-001 | Reverify and pin the workspace bootstrap: Expo/React Native/Android SDK baseline, Node, npm, NestJS, Drizzle, and root quality tooling. Supabase CLI/PostgreSQL and Terraform/provider version evidence stays with the later tickets that introduce those toolchains. | MVP-003 and every later ticket that consumes the bootstrap toolchain | Lockfiles/configuration plus bootstrap evidence; Architecture §8 permits this. |
 | TD-002 | Choose environment-specific Android application IDs, deep-link schemes, EAS project/build identities, Firebase projects, OAuth redirects, and the owner allowlist value. | MVP-008, MVP-011 | Environment inventory; secrets stay outside Git. |
 | TD-003 | Document the global NestJS `ValidationPipe` unknown-field policy and bounded request/input limits. Any user-visible limit not entailed by the spec enters change control. | MVP-005 | Narrow technical decision under Architecture §§3.10 and 6. |
 | TD-004 | Promote `expo-location` or activate the preapproved Kotlin `GeofencingClient` fallback from physical-device evidence. | MVP-020 | Geofencing spike report and keep/fallback decision. |
@@ -66,7 +66,7 @@ This register records the implementation blockers identified at baseline freeze.
 | DOC-001 | Resolved — administrative correction | Implementation lead | Architecture v0.1.9 cites Product Spec v0.1.27; no behavior changed. | None |
 | PD-001 | Resolved — product decision | Product owner | Product Spec v0.1.26 / OD-051: fixed 300-metre MVP region; testing-tunable, not user-configurable. | None |
 | PD-002 | Resolved — product decision | Product owner | Product Spec v0.1.27 / OD-052 / RULE-043 defines deterministic Task-list ordering. | None |
-| TD-001 | Open — bootstrap evidence | Implementation lead | Verified versions in lockfiles/configuration and bootstrap evidence. | MVP-002 |
+| TD-001 | Resolved — bootstrap evidence (2026-08-22) | Implementation lead | `.nvmrc`, `package.json`, and `package-lock.json` pin current Node 24 LTS 24.19.0, npm 11.12.1, Expo SDK 57.0.15 / React Native 0.86.2, NestJS 11.2.1, Drizzle 0.45.2 / Kit 0.31.10, TypeScript 5.9.3, ESLint 10.9.0, Prettier 3.9.6, and Jest 29.7.0. The compatible TypeScript 5.9 line is deliberate: the selected `typescript-eslint` 8.56.1 supports TypeScript below 6. Provider/local-stack and infrastructure pinning belongs to the ticket that introduces each toolchain. | None |
 | TD-002 | Open — environment configuration | Implementation lead | Environment inventory; secret values remain outside Git. | MVP-008, MVP-011 |
 | TD-003 | Open — implementation decision | API engineering | Reviewed validation policy and bounded input configuration; any product-visible limit enters product change control. | MVP-005 |
 | TD-004 | Open — physical-device evidence | Mobile engineering | Geofencing spike report selecting `expo-location` or the pre-approved Kotlin fallback. | MVP-020 |
@@ -110,12 +110,12 @@ This register records the implementation blockers identified at baseline freeze.
 - **Objective:** Create the approved monorepo skeleton, strict TypeScript, ESLint, Prettier, Jest foundations, and one reproducible root check command.
 - **Requirements / ACs:** NFR-005; Section 6.4 item 7; supports all ACs.
 - **Architecture:** §3 Technology choices; §§3.7, 3.13, 3.14; §5 Repository strategy; §7 Verification.
-- **Dependencies:** MVP-001; TD-001.
+- **Dependencies:** MVP-001. TD-001 is the first in-ticket bootstrap evidence gate, not a separate dependency.
 - **Expected change surface:** root `package.json`, lockfile, workspace/TS/lint/format/Jest configs, `apps/mobile/`, `apps/api/`, `packages/{api-client,contracts,config}/`, `.github/workflows/` check workflow.
 - **Tests:** Root format/lint/type/test command succeeds on empty scaffolds; generated-code and lockfile drift checks are wired.
 - **Security/privacy:** CI permissions read-only by default; no secrets, generated credentials, analytics, crash SDK, or production-only packages.
 - **Done:** A clean clone can install deterministically and run the same checks locally and in CI.
-- **Technical decision required:** **Yes** — exact versions are TD-001; architecture and package choices are already approved.
+- **Technical decision required:** No owner decision. TD-001 must be resolved and recorded as this ticket's first slice; any discovery that would change approved architecture, product behavior, privacy, scope, or cost boundaries stops for change control.
 
 #### MVP-003 — Build the deterministic local integration environment
 
