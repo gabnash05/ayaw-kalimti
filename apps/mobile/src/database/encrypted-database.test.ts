@@ -14,6 +14,7 @@ import {
 
 const createDatabase = () => ({
   execAsync: jest.fn().mockResolvedValue(undefined),
+  getFirstAsync: jest.fn().mockResolvedValue(null),
   closeAsync: jest.fn().mockResolvedValue(undefined),
 });
 const createDriver = () => ({
@@ -62,6 +63,21 @@ describe('encrypted local database', () => {
     expect(driver.deleteDatabaseAsync).toHaveBeenCalledWith(DATABASE_NAME);
     expect(store.deleteItemAsync).toHaveBeenCalledWith(
       DATABASE_KEY_STORAGE_KEY,
+    );
+  });
+
+  it('does not reapply an already recorded migration after restart', async () => {
+    const database = createDatabase();
+    database.getFirstAsync.mockResolvedValue({ version: 1 });
+    const driver = createDriver();
+    driver.openDatabaseAsync.mockResolvedValue(database);
+    await openEncryptedDatabase(
+      driver,
+      createStore('02'.repeat(32)),
+      randomBytes,
+    );
+    expect(database.execAsync).not.toHaveBeenCalledWith(
+      expect.stringContaining('local_saved_place_targets'),
     );
   });
 
