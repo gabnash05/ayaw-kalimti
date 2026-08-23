@@ -90,4 +90,18 @@ describe('encrypted local database', () => {
       DATABASE_KEY_STORAGE_KEY,
     );
   });
+
+  it('attempts both cleanup steps and reports a deletion failure', async () => {
+    const driver = createDriver();
+    driver.deleteDatabaseAsync.mockRejectedValueOnce(
+      new Error('delete failed'),
+    );
+    const store = createStore();
+    await expect(clearProtectedLocalStorage(driver, store)).rejects.toThrow(
+      'delete failed',
+    );
+    expect(store.deleteItemAsync).toHaveBeenCalledWith(
+      DATABASE_KEY_STORAGE_KEY,
+    );
+  });
 });

@@ -45,8 +45,14 @@ export async function clearProtectedLocalStorage(
   driver: DatabaseDriver = SQLite,
   keyStore?: KeyStore,
 ): Promise<void> {
-  await Promise.allSettled([
+  const results = await Promise.allSettled([
     driver.deleteDatabaseAsync(DATABASE_NAME),
     clearDatabaseKey(keyStore),
   ]);
+  const failedCleanup = results.find(
+    (result): result is PromiseRejectedResult => result.status === 'rejected',
+  );
+  if (failedCleanup !== undefined) {
+    throw failedCleanup.reason;
+  }
 }
