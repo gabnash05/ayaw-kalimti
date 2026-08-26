@@ -25,6 +25,12 @@ export class InvalidStoredDatabaseKeyError extends Error {
   }
 }
 
+export class InvalidGeneratedDatabaseKeyError extends Error {
+  public constructor() {
+    super('The generated protected database key is invalid.');
+  }
+}
+
 export function encodeKey(bytes: Uint8Array): string {
   return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join(
     '',
@@ -43,9 +49,11 @@ export async function getOrCreateDatabaseKey(
     return storedKey;
   }
 
-  const key = encodeKey(
-    await randomBytes.getRandomBytesAsync(DATABASE_KEY_BYTES),
-  );
+  const bytes = await randomBytes.getRandomBytesAsync(DATABASE_KEY_BYTES);
+  if (bytes.length !== DATABASE_KEY_BYTES) {
+    throw new InvalidGeneratedDatabaseKeyError();
+  }
+  const key = encodeKey(bytes);
   await keyStore.setItemAsync(DATABASE_KEY_STORAGE_KEY, key, {
     requireAuthentication: false,
   });
