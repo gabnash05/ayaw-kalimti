@@ -33,6 +33,16 @@ export class ProtectedStorageCleanupError extends Error {
 const createArtifactFile: ArtifactFileFactory = (directory, name) =>
   new File(directory, name);
 
+function normalizeArtifactDirectory(directory: string): string {
+  if (directory.startsWith('file:///')) {
+    return directory;
+  }
+  if (directory.startsWith('/')) {
+    return `file://${directory}`;
+  }
+  throw new ProtectedStorageCleanupError();
+}
+
 function isAbsentAfterDeleteFailure(file: ArtifactFile): boolean {
   try {
     return !file.exists;
@@ -49,11 +59,13 @@ export function deleteProtectedDatabaseArtifacts(
     throw new ProtectedStorageCleanupError();
   }
 
+  const artifactDirectory = normalizeArtifactDirectory(directory);
+
   let failed = false;
   for (const name of PROTECTED_DATABASE_ARTIFACTS) {
     let file: ArtifactFile | undefined;
     try {
-      file = createFile(directory, name);
+      file = createFile(artifactDirectory, name);
       file.delete();
     } catch {
       if (file === undefined || !isAbsentAfterDeleteFailure(file)) {

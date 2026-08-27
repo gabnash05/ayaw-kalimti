@@ -46,6 +46,21 @@ describe('protected database artifacts', () => {
     }
   });
 
+  it('normalizes the native Android database path to a file URI', () => {
+    const { factory } = createFiles();
+    const directories: string[] = [];
+    deleteProtectedDatabaseArtifacts(
+      '/data/user/0/app/files/SQLite',
+      (directory, name) => {
+        directories.push(directory);
+        return factory(directory, name);
+      },
+    );
+    expect(new Set(directories)).toEqual(
+      new Set(['file:///data/user/0/app/files/SQLite']),
+    );
+  });
+
   it('is idempotent when an artifact is already absent', () => {
     const { files, factory } = createFiles();
     const journal = files.get(PROTECTED_DATABASE_ARTIFACTS[1]);
@@ -79,5 +94,12 @@ describe('protected database artifacts', () => {
     expect(() => deleteProtectedDatabaseArtifacts(undefined, factory)).toThrow(
       ProtectedStorageCleanupError,
     );
+  });
+
+  it('rejects a non-file database directory', () => {
+    const { factory } = createFiles();
+    expect(() =>
+      deleteProtectedDatabaseArtifacts('content://external/database', factory),
+    ).toThrow(ProtectedStorageCleanupError);
   });
 });
