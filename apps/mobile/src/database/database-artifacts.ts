@@ -21,6 +21,7 @@ export type ArtifactFileFactory = (
 ) => ArtifactFile;
 
 export interface DatabaseArtifactStore {
+  databaseExists(): boolean | Promise<boolean>;
   deleteAll(): void | Promise<void>;
 }
 
@@ -79,6 +80,23 @@ export function deleteProtectedDatabaseArtifacts(
   }
 }
 
+export function protectedDatabaseExists(
+  directory: unknown = defaultDatabaseDirectory,
+  createFile: ArtifactFileFactory = createArtifactFile,
+): boolean {
+  if (typeof directory !== 'string' || directory.length === 0) {
+    throw new ProtectedStorageCleanupError();
+  }
+
+  const artifactDirectory = normalizeArtifactDirectory(directory);
+  try {
+    return createFile(artifactDirectory, DATABASE_NAME).exists;
+  } catch {
+    throw new ProtectedStorageCleanupError();
+  }
+}
+
 export const expoDatabaseArtifactStore: DatabaseArtifactStore = {
+  databaseExists: protectedDatabaseExists,
   deleteAll: deleteProtectedDatabaseArtifacts,
 };

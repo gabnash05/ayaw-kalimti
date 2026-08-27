@@ -9,6 +9,7 @@ import {
 import {
   clearDatabaseKey,
   getOrCreateDatabaseKey,
+  InvalidStoredDatabaseKeyError,
   type KeyStore,
   type RandomBytes,
 } from './key-lifecycle.js';
@@ -25,6 +26,9 @@ export interface DatabaseDriver {
 }
 
 const quoteKey = (key: string): string => `PRAGMA key = "x'${key}'";`;
+const SQLITE_CORRUPT = 11;
+const SQLITE_NOTADB = 26;
+const SQLITE_ERROR_CODE = /(?:^|\s)Error code (\d+):/;
 
 export class ProtectedStorageInitializationError extends Error {
   public constructor() {
@@ -49,16 +53,28 @@ async function discardProtectedStorage(
   artifacts: DatabaseArtifactStore,
   keyStore: KeyStore | undefined,
 ): Promise<boolean> {
-  let closeFailed = false;
-  if (database !== undefined) {
-    try {
-      await database.closeAsync();
-    } catch {
-      closeFailed = true;
-    }
-  }
-
+  const closeFailed = await closeDatabase(database);
   return (await clearStorageArtifacts(artifacts, keyStore)) || closeFailed;
+}
+
+async function closeDatabase(
+  database: LocalDatabase | undefined,
+): Promise<boolean> {
+  if (database === undefined) return false;
+  try {
+    await database.closeAsync();
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+function hasUnrecoverableSqliteCode(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const match = SQLITE_ERROR_CODE.exec(error.message);
+  if (match === null) return false;
+  const code = Number(match[1]);
+  return code === SQLITE_CORRUPT || code === SQLITE_NOTADB;
 }
 
 async function clearStorageArtifacts(
@@ -86,10 +102,22 @@ export async function openEncryptedDatabase(
   artifacts: DatabaseArtifactStore = expoDatabaseArtifactStore,
 ): Promise<LocalDatabase> {
   let database: LocalDatabase | undefined;
+  let databaseExisted: boolean;
+  let openAttempted = false;
+  let keyApplied = false;
+
+  try {
+    databaseExisted = await artifacts.databaseExists();
+  } catch {
+    throw new ProtectedStorageInitializationError();
+  }
+
   try {
     const key = await getOrCreateDatabaseKey(keyStore, randomBytes);
+    openAttempted = true;
     database = await driver.openDatabaseAsync(DATABASE_NAME);
     await database.execAsync(quoteKey(key));
+    keyApplied = true;
     const cipher = await database.getFirstAsync<{ cipher_version: string }>(
       'PRAGMA cipher_version;',
     );
@@ -98,13 +126,22 @@ export async function openEncryptedDatabase(
     }
     await applyLocalMigrations(database);
     return database;
-  } catch {
-    const recoveryFailed = await discardProtectedStorage(
-      database,
-      artifacts,
-      keyStore,
-    );
-    if (recoveryFailed) {
+  } catch (error) {
+    const discard =
+      error instanceof InvalidStoredDatabaseKeyError ||
+      (keyApplied && hasUnrecoverableSqliteCode(error)) ||
+      (!databaseExisted && openAttempted);
+
+    if (discard) {
+      const recoveryFailed = await discardProtectedStorage(
+        database,
+        artifacts,
+        keyStore,
+      );
+      if (recoveryFailed) {
+        throw new ProtectedStorageRecoveryError();
+      }
+    } else if (await closeDatabase(database)) {
       throw new ProtectedStorageRecoveryError();
     }
     throw new ProtectedStorageInitializationError();

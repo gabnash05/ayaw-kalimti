@@ -5,6 +5,7 @@ import {
   deleteProtectedDatabaseArtifacts,
   PROTECTED_DATABASE_ARTIFACTS,
   ProtectedStorageCleanupError,
+  protectedDatabaseExists,
   type ArtifactFileFactory,
 } from './database-artifacts.js';
 
@@ -37,6 +38,27 @@ const createFiles = (): {
 };
 
 describe('protected database artifacts', () => {
+  it('reports whether the primary encrypted database exists', () => {
+    const { files, factory } = createFiles();
+    expect(protectedDatabaseExists('file:///private/databases', factory)).toBe(
+      true,
+    );
+    const database = files.get(PROTECTED_DATABASE_ARTIFACTS[0]);
+    if (database === undefined) throw new Error('missing fixture');
+    database.exists = false;
+    expect(protectedDatabaseExists('file:///private/databases', factory)).toBe(
+      false,
+    );
+  });
+
+  it('fails safely when primary database existence cannot be read', () => {
+    expect(() =>
+      protectedDatabaseExists('file:///private/databases', () => {
+        throw new Error('storage unavailable');
+      }),
+    ).toThrow(ProtectedStorageCleanupError);
+  });
+
   it('deletes only the fixed database and sidecar names', () => {
     const { files, factory } = createFiles();
     deleteProtectedDatabaseArtifacts('file:///private/databases', factory);

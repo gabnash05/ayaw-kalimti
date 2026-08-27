@@ -34,7 +34,8 @@ const createStore = (value: string | null = null) => ({
   setItemAsync: jest.fn().mockResolvedValue(undefined),
   deleteItemAsync: jest.fn().mockResolvedValue(undefined),
 });
-const createArtifacts = () => ({
+const createArtifacts = (databaseExists = true) => ({
+  databaseExists: jest.fn().mockResolvedValue(databaseExists),
   deleteAll: jest.fn().mockResolvedValue(undefined),
 });
 const randomBytes = {
@@ -83,7 +84,7 @@ describe('encrypted local database', () => {
   });
 
   it.each([null, { cipher_version: '' }, { cipher_version: '   ' }])(
-    'rejects an unavailable SQLCipher runtime: %p',
+    'preserves existing storage when SQLCipher is unavailable: %p',
     async (cipher) => {
       const database = createDatabase();
       database.getFirstAsync.mockResolvedValue(cipher);
@@ -102,9 +103,25 @@ describe('encrypted local database', () => {
         'BEGIN IMMEDIATE TRANSACTION;',
       );
       expect(database.closeAsync).toHaveBeenCalled();
-      expect(artifacts.deleteAll).toHaveBeenCalled();
+      expect(artifacts.deleteAll).not.toHaveBeenCalled();
     },
   );
+
+  it('cleans an empty database created before first-install initialization fails', async () => {
+    const database = createDatabase();
+    database.getFirstAsync.mockResolvedValue(null);
+    const driver = createDriver();
+    driver.openDatabaseAsync.mockResolvedValue(database);
+    const store = createStore();
+    const artifacts = createArtifacts(false);
+    await expect(
+      openEncryptedDatabase(driver, store, randomBytes, artifacts),
+    ).rejects.toBeInstanceOf(ProtectedStorageInitializationError);
+    expect(artifacts.deleteAll).toHaveBeenCalled();
+    expect(store.deleteItemAsync).toHaveBeenCalledWith(
+      DATABASE_KEY_STORAGE_KEY,
+    );
+  });
 
   it('does not reapply an already recorded migration after restart', async () => {
     const database = createDatabase();
@@ -128,12 +145,43 @@ describe('encrypted local database', () => {
     );
   });
 
-  it('deletes unreadable local artifacts and their key after a database failure', async () => {
+  it.each([
+    ['corrupt', 11, 'database disk image is malformed'],
+    ['not a database', 26, 'file is not a database'],
+  ])(
+    'deletes storage after confirmed SQLite %s diagnosis',
+    async (_label, code, message) => {
+      const database = createDatabase();
+      database.getFirstAsync.mockImplementation((source: string) =>
+        source === 'PRAGMA cipher_version;'
+          ? Promise.resolve({ cipher_version: '4.7.0' })
+          : Promise.reject(new Error(`Error code ${code}: ${message}`)),
+      );
+      const driver = createDriver();
+      driver.openDatabaseAsync.mockResolvedValue(database);
+      const store = createStore('02'.repeat(32));
+      const artifacts = createArtifacts();
+      await expect(
+        openEncryptedDatabase(driver, store, randomBytes, artifacts),
+      ).rejects.toBeInstanceOf(ProtectedStorageInitializationError);
+      expect(database.closeAsync).toHaveBeenCalled();
+      expect(artifacts.deleteAll).toHaveBeenCalled();
+      expect(store.deleteItemAsync).toHaveBeenCalledWith(
+        DATABASE_KEY_STORAGE_KEY,
+      );
+    },
+  );
+
+  it('cleans a missing-key database after the replacement key confirms mismatch', async () => {
     const database = createDatabase();
-    database.execAsync.mockRejectedValueOnce(new Error('key mismatch'));
+    database.getFirstAsync.mockImplementation((source: string) =>
+      source === 'PRAGMA cipher_version;'
+        ? Promise.resolve({ cipher_version: '4.7.0' })
+        : Promise.reject(new Error('Error code 26: file is not a database')),
+    );
     const driver = createDriver();
     driver.openDatabaseAsync.mockResolvedValue(database);
-    const store = createStore('02'.repeat(32));
+    const store = createStore();
     const artifacts = createArtifacts();
     await expect(
       openEncryptedDatabase(driver, store, randomBytes, artifacts),
@@ -147,7 +195,11 @@ describe('encrypted local database', () => {
 
   it('surfaces a sanitized recovery error while attempting every cleanup step', async () => {
     const database = createDatabase();
-    database.execAsync.mockRejectedValueOnce(new Error('key mismatch'));
+    database.getFirstAsync.mockImplementation((source: string) =>
+      source === 'PRAGMA cipher_version;'
+        ? Promise.resolve({ cipher_version: '4.7.0' })
+        : Promise.reject(new Error('Error code 11: database is malformed')),
+    );
     database.closeAsync.mockRejectedValueOnce(new Error('close failed'));
     const driver = createDriver();
     driver.openDatabaseAsync.mockResolvedValue(database);
@@ -161,6 +213,118 @@ describe('encrypted local database', () => {
     expect(database.closeAsync).toHaveBeenCalled();
     expect(artifacts.deleteAll).toHaveBeenCalled();
     expect(store.deleteItemAsync).toHaveBeenCalled();
+  });
+
+  it('preserves storage after a transient SecureStore failure', async () => {
+    const driver = createDriver();
+    const store = createStore();
+    store.getItemAsync.mockRejectedValueOnce(new Error('keystore unavailable'));
+    const artifacts = createArtifacts();
+    await expect(
+      openEncryptedDatabase(driver, store, randomBytes, artifacts),
+    ).rejects.toBeInstanceOf(ProtectedStorageInitializationError);
+    expect(driver.openDatabaseAsync).not.toHaveBeenCalled();
+    expect(artifacts.deleteAll).not.toHaveBeenCalled();
+    expect(store.deleteItemAsync).not.toHaveBeenCalled();
+  });
+
+  it('preserves existing storage after a transient database-open failure', async () => {
+    const driver = createDriver();
+    driver.openDatabaseAsync.mockRejectedValueOnce(new Error('database busy'));
+    const store = createStore('02'.repeat(32));
+    const artifacts = createArtifacts();
+    await expect(
+      openEncryptedDatabase(driver, store, randomBytes, artifacts),
+    ).rejects.toBeInstanceOf(ProtectedStorageInitializationError);
+    expect(artifacts.deleteAll).not.toHaveBeenCalled();
+    expect(store.deleteItemAsync).not.toHaveBeenCalled();
+  });
+
+  it('cleans possible empty artifacts after a first-install open failure', async () => {
+    const driver = createDriver();
+    driver.openDatabaseAsync.mockRejectedValueOnce(new Error('open failed'));
+    const store = createStore();
+    const artifacts = createArtifacts(false);
+    await expect(
+      openEncryptedDatabase(driver, store, randomBytes, artifacts),
+    ).rejects.toBeInstanceOf(ProtectedStorageInitializationError);
+    expect(artifacts.deleteAll).toHaveBeenCalled();
+    expect(store.deleteItemAsync).toHaveBeenCalledWith(
+      DATABASE_KEY_STORAGE_KEY,
+    );
+  });
+
+  it('preserves existing storage after an unclassified migration failure', async () => {
+    const database = createDatabase();
+    database.execAsync.mockImplementation((source: string) =>
+      source.includes('CREATE TABLE local_saved_place_targets')
+        ? Promise.reject(new Error('Error code 1: migration failed'))
+        : Promise.resolve(),
+    );
+    const driver = createDriver();
+    driver.openDatabaseAsync.mockResolvedValue(database);
+    const store = createStore('02'.repeat(32));
+    const artifacts = createArtifacts();
+    await expect(
+      openEncryptedDatabase(driver, store, randomBytes, artifacts),
+    ).rejects.toBeInstanceOf(ProtectedStorageInitializationError);
+    expect(database.execAsync).toHaveBeenCalledWith('ROLLBACK;');
+    expect(database.closeAsync).toHaveBeenCalled();
+    expect(artifacts.deleteAll).not.toHaveBeenCalled();
+    expect(store.deleteItemAsync).not.toHaveBeenCalled();
+  });
+
+  it('preserves existing storage when migration rollback also fails', async () => {
+    const database = createDatabase();
+    database.execAsync.mockImplementation((source: string) => {
+      if (source.includes('CREATE TABLE local_saved_place_targets')) {
+        return Promise.reject(new Error('migration failed'));
+      }
+      if (source === 'ROLLBACK;') {
+        return Promise.reject(new Error('rollback failed'));
+      }
+      return Promise.resolve();
+    });
+    const driver = createDriver();
+    driver.openDatabaseAsync.mockResolvedValue(database);
+    const store = createStore('02'.repeat(32));
+    const artifacts = createArtifacts();
+    await expect(
+      openEncryptedDatabase(driver, store, randomBytes, artifacts),
+    ).rejects.toBeInstanceOf(ProtectedStorageInitializationError);
+    expect(database.closeAsync).toHaveBeenCalled();
+    expect(artifacts.deleteAll).not.toHaveBeenCalled();
+    expect(store.deleteItemAsync).not.toHaveBeenCalled();
+  });
+
+  it('fails safely without opening storage when artifact state is unavailable', async () => {
+    const driver = createDriver();
+    const store = createStore('02'.repeat(32));
+    const artifacts = createArtifacts();
+    artifacts.databaseExists.mockRejectedValueOnce(
+      new Error('artifact state unavailable'),
+    );
+    await expect(
+      openEncryptedDatabase(driver, store, randomBytes, artifacts),
+    ).rejects.toBeInstanceOf(ProtectedStorageInitializationError);
+    expect(driver.openDatabaseAsync).not.toHaveBeenCalled();
+    expect(artifacts.deleteAll).not.toHaveBeenCalled();
+    expect(store.deleteItemAsync).not.toHaveBeenCalled();
+  });
+
+  it('reports recovery failure without deleting data when a transient handle cannot close', async () => {
+    const database = createDatabase();
+    database.getFirstAsync.mockResolvedValue(null);
+    database.closeAsync.mockRejectedValueOnce(new Error('close failed'));
+    const driver = createDriver();
+    driver.openDatabaseAsync.mockResolvedValue(database);
+    const store = createStore('02'.repeat(32));
+    const artifacts = createArtifacts();
+    await expect(
+      openEncryptedDatabase(driver, store, randomBytes, artifacts),
+    ).rejects.toBeInstanceOf(ProtectedStorageRecoveryError);
+    expect(artifacts.deleteAll).not.toHaveBeenCalled();
+    expect(store.deleteItemAsync).not.toHaveBeenCalled();
   });
 
   it('clears database artifacts and key together on logout or deletion', async () => {
