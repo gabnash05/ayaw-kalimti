@@ -1,7 +1,10 @@
 import { AppState, Button, StyleSheet, Text, View } from 'react-native';
 import { useCallback, useEffect, useState } from 'react';
 
-import { physicalStorageVerificationProbe } from './physical-verification.js';
+import {
+  physicalStorageVerificationProbe,
+  type LockedBackgroundProbeFailureStage,
+} from './physical-verification.js';
 
 type ProbeStatus =
   | 'ready'
@@ -19,9 +22,12 @@ export function PhysicalStorageVerificationPanel() {
 
 function DevelopmentPhysicalStorageVerificationPanel() {
   const [status, setStatus] = useState<ProbeStatus>('ready');
+  const [lockedDiagnostic, setLockedDiagnostic] =
+    useState<LockedBackgroundProbeFailureStage>('none');
 
   const run = useCallback(
     async (operation: () => Promise<void>, success: ProbeStatus) => {
+      setLockedDiagnostic('none');
       setStatus('working');
       try {
         await operation();
@@ -39,7 +45,12 @@ function DevelopmentPhysicalStorageVerificationPanel() {
         .handleAppStateChange(appState)
         .then((result) => {
           if (result === 'passed') setStatus('locked-passed');
-          if (result === 'failed') setStatus('failed');
+          if (result === 'failed') {
+            setLockedDiagnostic(
+              physicalStorageVerificationProbe.getLockedBackgroundFailureStage(),
+            );
+            setStatus('failed');
+          }
         });
     });
     return () => subscription.remove();
@@ -51,6 +62,11 @@ function DevelopmentPhysicalStorageVerificationPanel() {
     <View style={styles.container}>
       <Text style={styles.heading}>Protected storage verification</Text>
       <Text testID="storage-verification-status">Status: {status}</Text>
+      {status === 'failed' && lockedDiagnostic !== 'none' ? (
+        <Text testID="storage-verification-diagnostic">
+          Diagnostic: locked-background-{lockedDiagnostic}
+        </Text>
+      ) : null}
       <Button
         disabled={working}
         title="Hold journal transaction"

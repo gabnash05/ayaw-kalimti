@@ -14,26 +14,31 @@ const PRIVACY_PROBE_ID = 'synthetic-storage-probe';
 const LOCKED_BACKGROUND_PROBE_ID = 'synthetic-locked-background-probe';
 const LOCKED_BACKGROUND_PROBE_REASON = 'synthetic_locked_background_passed';
 const PROBE_LIFETIME_MS = 60 * 60 * 1000;
-const LOCKED_BACKGROUND_DELAY_MS = 1000;
 
 export type LockedBackgroundProbeResult =
   'idle' | 'armed' | 'running' | 'passed' | 'failed';
 
+export type LockedBackgroundProbeFailureStage =
+  | 'none'
+  | 'open'
+  | 'write'
+  | 'close'
+  | 'foreground-open'
+  | 'marker-read'
+  | 'marker-missing'
+  | 'marker-cleanup';
+
 interface PhysicalStorageVerificationDependencies {
   openDatabase?: () => Promise<LocalDatabase>;
-  sleep?: (milliseconds: number) => Promise<void>;
 }
-
-const sleep = (milliseconds: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 export class PhysicalStorageVerificationProbe {
   private transactionOpen = false;
-  private appInBackground = false;
   private lockedBackgroundResult: LockedBackgroundProbeResult = 'idle';
+  private lockedBackgroundFailureStage: LockedBackgroundProbeFailureStage =
+    'none';
   private lockedBackgroundAttempt: Promise<void> | undefined;
   private readonly openDatabase: () => Promise<LocalDatabase>;
-  private readonly sleep: (milliseconds: number) => Promise<void>;
 
   public constructor(
     private readonly runtime: ProtectedStorageRuntime = protectedStorageRuntime,
@@ -42,7 +47,6 @@ export class PhysicalStorageVerificationProbe {
     dependencies: PhysicalStorageVerificationDependencies = {},
   ) {
     this.openDatabase = dependencies.openDatabase ?? openEncryptedDatabase;
-    this.sleep = dependencies.sleep ?? sleep;
   }
 
   public async holdJournalTransaction(): Promise<void> {
@@ -92,16 +96,19 @@ export class PhysicalStorageVerificationProbe {
       `DELETE FROM protected_diagnostics WHERE id = '${LOCKED_BACKGROUND_PROBE_ID}';`,
     );
     this.lockedBackgroundAttempt = undefined;
-    this.appInBackground = false;
     this.lockedBackgroundResult = 'armed';
+    this.lockedBackgroundFailureStage = 'none';
+  }
+
+  public getLockedBackgroundFailureStage(): LockedBackgroundProbeFailureStage {
+    return this.lockedBackgroundFailureStage;
   }
 
   public async handleAppStateChange(
     appState: string,
   ): Promise<LockedBackgroundProbeResult> {
-    this.appInBackground = appState === 'background';
     if (
-      this.appInBackground &&
+      appState === 'background' &&
       this.lockedBackgroundResult === 'armed' &&
       this.lockedBackgroundAttempt === undefined
     ) {
@@ -125,26 +132,24 @@ export class PhysicalStorageVerificationProbe {
   private async runLockedBackgroundAccess(): Promise<void> {
     let database: LocalDatabase | undefined;
     try {
-      await this.sleep(LOCKED_BACKGROUND_DELAY_MS);
-      if (!this.appInBackground) {
-        this.lockedBackgroundResult = 'failed';
-        return;
-      }
       database = await this.openDatabase();
+    } catch {
+      this.failLockedBackgroundAccess('open');
+      return;
+    }
+    try {
       const occurredAt = this.now();
       await database.execAsync(
         `INSERT OR REPLACE INTO protected_diagnostics (id, reason_code, occurred_at_ms, expires_at_ms) VALUES ('${LOCKED_BACKGROUND_PROBE_ID}', '${LOCKED_BACKGROUND_PROBE_REASON}', ${occurredAt}, ${occurredAt + PROBE_LIFETIME_MS});`,
       );
       this.lockedBackgroundResult = 'passed';
     } catch {
-      this.lockedBackgroundResult = 'failed';
+      this.failLockedBackgroundAccess('write');
     } finally {
-      if (database !== undefined) {
-        try {
-          await database.closeAsync();
-        } catch {
-          this.lockedBackgroundResult = 'failed';
-        }
+      try {
+        await database.closeAsync();
+      } catch {
+        this.failLockedBackgroundAccess('close');
       }
     }
   }
@@ -152,21 +157,51 @@ export class PhysicalStorageVerificationProbe {
   private async consumeLockedBackgroundResult(): Promise<'passed' | 'failed'> {
     let result: 'passed' | 'failed' =
       this.lockedBackgroundResult === 'passed' ? 'passed' : 'failed';
+    let database: LocalDatabase;
     try {
-      const database = await this.runtime.initialize();
+      database = await this.runtime.initialize();
+    } catch {
+      this.failLockedBackgroundAccess('foreground-open');
+      return this.finishLockedBackgroundAccess('failed');
+    }
+
+    try {
       const marker = await database.getFirstAsync<{ reason_code: string }>(
         `SELECT reason_code FROM protected_diagnostics WHERE id = '${LOCKED_BACKGROUND_PROBE_ID}';`,
       );
       if (marker?.reason_code !== LOCKED_BACKGROUND_PROBE_REASON) {
         result = 'failed';
+        this.failLockedBackgroundAccess('marker-missing');
       }
+    } catch {
+      result = 'failed';
+      this.failLockedBackgroundAccess('marker-read');
+    }
+
+    try {
       await database.execAsync(
         `DELETE FROM protected_diagnostics WHERE id = '${LOCKED_BACKGROUND_PROBE_ID}';`,
       );
     } catch {
       result = 'failed';
+      this.failLockedBackgroundAccess('marker-cleanup');
     }
 
+    return this.finishLockedBackgroundAccess(result);
+  }
+
+  private failLockedBackgroundAccess(
+    stage: Exclude<LockedBackgroundProbeFailureStage, 'none'>,
+  ): void {
+    if (this.lockedBackgroundFailureStage === 'none') {
+      this.lockedBackgroundFailureStage = stage;
+    }
+    this.lockedBackgroundResult = 'failed';
+  }
+
+  private finishLockedBackgroundAccess(
+    result: 'passed' | 'failed',
+  ): 'passed' | 'failed' {
     this.lockedBackgroundAttempt = undefined;
     this.lockedBackgroundResult = 'idle';
     return result;
