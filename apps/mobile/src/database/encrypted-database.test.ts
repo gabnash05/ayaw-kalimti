@@ -41,6 +41,8 @@ const createArtifacts = (databaseExists = true) => ({
 const randomBytes = {
   getRandomBytesAsync: jest.fn().mockResolvedValue(new Uint8Array(32).fill(1)),
 };
+const createExpoSqliteError = (message: string) =>
+  Object.assign(new Error(message), { code: 'ERR_INTERNAL_SQLITE_ERROR' });
 
 describe('encrypted local database', () => {
   it('creates a protected key, verifies SQLCipher, and migrates transactionally', async () => {
@@ -171,6 +173,62 @@ describe('encrypted local database', () => {
       );
     },
   );
+
+  it.each([
+    ['database disk image is malformed'],
+    ['file is not a database'],
+    [
+      "Call to function 'NativeDatabase.execAsync' has been rejected. Caused by: file is not a database",
+    ],
+  ])('deletes storage for the Expo SQLite exec error: %s', async (message) => {
+    const database = createDatabase();
+    database.execAsync.mockImplementation((source: string) =>
+      source.includes('CREATE TABLE local_saved_place_targets')
+        ? Promise.reject(createExpoSqliteError(message))
+        : Promise.resolve(),
+    );
+    const driver = createDriver();
+    driver.openDatabaseAsync.mockResolvedValue(database);
+    const store = createStore('02'.repeat(32));
+    const artifacts = createArtifacts();
+
+    await expect(
+      openEncryptedDatabase(driver, store, randomBytes, artifacts),
+    ).rejects.toBeInstanceOf(ProtectedStorageInitializationError);
+    expect(database.closeAsync).toHaveBeenCalled();
+    expect(artifacts.deleteAll).toHaveBeenCalled();
+    expect(store.deleteItemAsync).toHaveBeenCalledWith(
+      DATABASE_KEY_STORAGE_KEY,
+    );
+  });
+
+  it.each([
+    [new Error('file is not a database')],
+    [
+      createExpoSqliteError(
+        'file is not a database while a transient lock is held',
+      ),
+    ],
+    [createExpoSqliteError('database is busy')],
+  ])('preserves storage for an unconfirmed SQLite failure', async (error) => {
+    const database = createDatabase();
+    database.execAsync.mockImplementation((source: string) =>
+      source.includes('CREATE TABLE local_saved_place_targets')
+        ? Promise.reject(error)
+        : Promise.resolve(),
+    );
+    const driver = createDriver();
+    driver.openDatabaseAsync.mockResolvedValue(database);
+    const store = createStore('02'.repeat(32));
+    const artifacts = createArtifacts();
+
+    await expect(
+      openEncryptedDatabase(driver, store, randomBytes, artifacts),
+    ).rejects.toBeInstanceOf(ProtectedStorageInitializationError);
+    expect(database.closeAsync).toHaveBeenCalled();
+    expect(artifacts.deleteAll).not.toHaveBeenCalled();
+    expect(store.deleteItemAsync).not.toHaveBeenCalled();
+  });
 
   it('cleans a missing-key database after the replacement key confirms mismatch', async () => {
     const database = createDatabase();

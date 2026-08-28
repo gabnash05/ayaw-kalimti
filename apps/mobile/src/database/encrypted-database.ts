@@ -29,6 +29,11 @@ const quoteKey = (key: string): string => `PRAGMA key = "x'${key}'";`;
 const SQLITE_CORRUPT = 11;
 const SQLITE_NOTADB = 26;
 const SQLITE_ERROR_CODE = /(?:^|\s)Error code (\d+):/;
+const EXPO_SQLITE_ERROR_CODE = 'ERR_INTERNAL_SQLITE_ERROR';
+const SQLITE_UNRECOVERABLE_MESSAGES = [
+  'database disk image is malformed',
+  'file is not a database',
+] as const;
 
 export class ProtectedStorageInitializationError extends Error {
   public constructor() {
@@ -69,12 +74,20 @@ async function closeDatabase(
   }
 }
 
-function hasUnrecoverableSqliteCode(error: unknown): boolean {
+function hasUnrecoverableSqliteDiagnosis(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const match = SQLITE_ERROR_CODE.exec(error.message);
-  if (match === null) return false;
-  const code = Number(match[1]);
-  return code === SQLITE_CORRUPT || code === SQLITE_NOTADB;
+  if (match !== null) {
+    const code = Number(match[1]);
+    return code === SQLITE_CORRUPT || code === SQLITE_NOTADB;
+  }
+
+  const code = (error as Error & { code?: unknown }).code;
+  if (code !== EXPO_SQLITE_ERROR_CODE) return false;
+  return SQLITE_UNRECOVERABLE_MESSAGES.some(
+    (message) =>
+      error.message === message || error.message.endsWith(`: ${message}`),
+  );
 }
 
 async function clearStorageArtifacts(
@@ -129,7 +142,7 @@ export async function openEncryptedDatabase(
   } catch (error) {
     const discard =
       error instanceof InvalidStoredDatabaseKeyError ||
-      (keyApplied && hasUnrecoverableSqliteCode(error)) ||
+      (keyApplied && hasUnrecoverableSqliteDiagnosis(error)) ||
       (!databaseExisted && openAttempted);
 
     if (discard) {
