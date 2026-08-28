@@ -1,11 +1,23 @@
-import { Button, StyleSheet, Text, View } from 'react-native';
-import { useCallback, useState } from 'react';
+import { AppState, Button, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
 
 import { physicalStorageVerificationProbe } from './physical-verification.js';
 
-type ProbeStatus = 'ready' | 'working' | 'journal-held' | 'complete' | 'failed';
+type ProbeStatus =
+  | 'ready'
+  | 'working'
+  | 'journal-held'
+  | 'locked-armed'
+  | 'locked-passed'
+  | 'complete'
+  | 'failed';
 
 export function PhysicalStorageVerificationPanel() {
+  if (!__DEV__) return null;
+  return <DevelopmentPhysicalStorageVerificationPanel />;
+}
+
+function DevelopmentPhysicalStorageVerificationPanel() {
   const [status, setStatus] = useState<ProbeStatus>('ready');
 
   const run = useCallback(
@@ -21,7 +33,18 @@ export function PhysicalStorageVerificationPanel() {
     [],
   );
 
-  if (!__DEV__) return null;
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (appState) => {
+      void physicalStorageVerificationProbe
+        .handleAppStateChange(appState)
+        .then((result) => {
+          if (result === 'passed') setStatus('locked-passed');
+          if (result === 'failed') setStatus('failed');
+        });
+    });
+    return () => subscription.remove();
+  }, []);
+
   const working = status === 'working';
 
   return (
@@ -45,6 +68,16 @@ export function PhysicalStorageVerificationPanel() {
           void run(
             () => physicalStorageVerificationProbe.rollbackJournalTransaction(),
             'complete',
+          );
+        }}
+      />
+      <Button
+        disabled={working}
+        title="Arm locked-background access"
+        onPress={() => {
+          void run(
+            () => physicalStorageVerificationProbe.armLockedBackgroundAccess(),
+            'locked-armed',
           );
         }}
       />

@@ -31,6 +31,29 @@ const createHarness = () => {
   };
 };
 
+const createLockedBackgroundHarness = () => {
+  const harness = createHarness();
+  const backgroundDatabase = {
+    execAsync: jest.fn().mockResolvedValue(undefined),
+    getFirstAsync: jest.fn().mockResolvedValue(null),
+    closeAsync: jest.fn().mockResolvedValue(undefined),
+  };
+  const openDatabase = jest.fn().mockResolvedValue(backgroundDatabase);
+  const sleep = jest.fn().mockResolvedValue(undefined);
+  return {
+    ...harness,
+    backgroundDatabase,
+    openDatabase,
+    sleep,
+    probe: new PhysicalStorageVerificationProbe(
+      harness.runtime,
+      harness.removeKey,
+      () => 1000,
+      { openDatabase, sleep },
+    ),
+  };
+};
+
 describe('physical storage verification probe', () => {
   it('holds a transaction containing only fixed synthetic canaries', async () => {
     const { database, probe } = createHarness();
@@ -86,5 +109,124 @@ describe('physical storage verification probe', () => {
     await probe.clearProtectedStorage();
     expect(database.execAsync).toHaveBeenCalledWith('ROLLBACK;');
     expect(clear).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens and closes protected storage while backgrounded and consumes its marker', async () => {
+    const { backgroundDatabase, database, openDatabase, probe, sleep } =
+      createLockedBackgroundHarness();
+    database.getFirstAsync.mockResolvedValue({
+      reason_code: 'synthetic_locked_background_passed',
+    });
+
+    await probe.armLockedBackgroundAccess();
+    await expect(probe.handleAppStateChange('background')).resolves.toBe(
+      'passed',
+    );
+    await expect(probe.handleAppStateChange('active')).resolves.toBe('passed');
+
+    expect(sleep).toHaveBeenCalledWith(1000);
+    expect(openDatabase).toHaveBeenCalledTimes(1);
+    expect(backgroundDatabase.execAsync).toHaveBeenCalledWith(
+      expect.stringContaining('synthetic_locked_background_passed'),
+    );
+    expect(backgroundDatabase.closeAsync).toHaveBeenCalledTimes(1);
+    expect(database.execAsync).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "DELETE FROM protected_diagnostics WHERE id = 'synthetic-locked-background-probe'",
+      ),
+    );
+  });
+
+  it('shares one locked-background attempt across duplicate background events', async () => {
+    const harness = createLockedBackgroundHarness();
+    let finishSleep: (() => void) | undefined;
+    harness.sleep.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSleep = resolve;
+        }),
+    );
+    await harness.probe.armLockedBackgroundAccess();
+
+    const first = harness.probe.handleAppStateChange('background');
+    const duplicate = harness.probe.handleAppStateChange('background');
+    expect(harness.openDatabase).not.toHaveBeenCalled();
+    finishSleep?.();
+    await Promise.all([first, duplicate]);
+
+    expect(harness.openDatabase).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails without opening storage when the app returns active before the delay', async () => {
+    const harness = createLockedBackgroundHarness();
+    let finishSleep: (() => void) | undefined;
+    harness.sleep.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSleep = resolve;
+        }),
+    );
+    await harness.probe.armLockedBackgroundAccess();
+
+    const background = harness.probe.handleAppStateChange('background');
+    const active = harness.probe.handleAppStateChange('active');
+    finishSleep?.();
+
+    await background;
+    await expect(active).resolves.toBe('failed');
+    expect(harness.openDatabase).not.toHaveBeenCalled();
+  });
+
+  it('reports a sanitized failure when the background database cannot open', async () => {
+    const harness = createLockedBackgroundHarness();
+    harness.openDatabase.mockRejectedValueOnce(
+      new Error('sensitive native failure'),
+    );
+    await harness.probe.armLockedBackgroundAccess();
+
+    await expect(
+      harness.probe.handleAppStateChange('background'),
+    ).resolves.toBe('failed');
+    await expect(harness.probe.handleAppStateChange('active')).resolves.toBe(
+      'failed',
+    );
+  });
+
+  it('reports a sanitized failure when the background delay cannot complete', async () => {
+    const harness = createLockedBackgroundHarness();
+    harness.sleep.mockRejectedValueOnce(new Error('timer unavailable'));
+    await harness.probe.armLockedBackgroundAccess();
+
+    await expect(
+      harness.probe.handleAppStateChange('background'),
+    ).resolves.toBe('failed');
+    expect(harness.openDatabase).not.toHaveBeenCalled();
+  });
+
+  it('fails verification when the background connection cannot close', async () => {
+    const harness = createLockedBackgroundHarness();
+    harness.backgroundDatabase.closeAsync.mockRejectedValueOnce(
+      new Error('close failed'),
+    );
+    await harness.probe.armLockedBackgroundAccess();
+
+    await expect(
+      harness.probe.handleAppStateChange('background'),
+    ).resolves.toBe('failed');
+    await expect(harness.probe.handleAppStateChange('active')).resolves.toBe(
+      'failed',
+    );
+  });
+
+  it('fails verification when the protected success marker is absent', async () => {
+    const harness = createLockedBackgroundHarness();
+    await harness.probe.armLockedBackgroundAccess();
+
+    await expect(
+      harness.probe.handleAppStateChange('background'),
+    ).resolves.toBe('passed');
+    await expect(harness.probe.handleAppStateChange('active')).resolves.toBe(
+      'failed',
+    );
   });
 });
