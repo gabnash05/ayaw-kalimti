@@ -355,6 +355,40 @@ describe('encrypted local database', () => {
     expect(store.deleteItemAsync).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [new Error('Error code 11: database disk image is malformed')],
+    [new Error('Error code 26: file is not a database')],
+    [createExpoSqliteError('database disk image is malformed')],
+    [createExpoSqliteError('file is not a database')],
+  ])(
+    'deletes confirmed corrupt storage when migration rollback also fails',
+    async (migrationError) => {
+      const database = createDatabase();
+      database.execAsync.mockImplementation((source: string) => {
+        if (source.includes('CREATE TABLE local_saved_place_targets')) {
+          return Promise.reject(migrationError);
+        }
+        if (source === 'ROLLBACK;') {
+          return Promise.reject(new Error('rollback failed'));
+        }
+        return Promise.resolve();
+      });
+      const driver = createDriver();
+      driver.openDatabaseAsync.mockResolvedValue(database);
+      const store = createStore('02'.repeat(32));
+      const artifacts = createArtifacts();
+
+      await expect(
+        openEncryptedDatabase(driver, store, randomBytes, artifacts),
+      ).rejects.toBeInstanceOf(ProtectedStorageInitializationError);
+      expect(database.closeAsync).toHaveBeenCalled();
+      expect(artifacts.deleteAll).toHaveBeenCalled();
+      expect(store.deleteItemAsync).toHaveBeenCalledWith(
+        DATABASE_KEY_STORAGE_KEY,
+      );
+    },
+  );
+
   it('fails safely without opening storage when artifact state is unavailable', async () => {
     const driver = createDriver();
     const store = createStore('02'.repeat(32));

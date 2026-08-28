@@ -52,4 +52,23 @@ describe('protected local migrations', () => {
     );
     expect(database.execAsync).not.toHaveBeenCalledWith('COMMIT;');
   });
+
+  it('preserves the original migration diagnosis when rollback also fails', async () => {
+    const database = createDatabase();
+    const migrationError = new Error(
+      'Error code 11: database disk image is malformed',
+    );
+    database.execAsync.mockImplementation((source: string) => {
+      if (source.includes('CREATE TABLE local_saved_place_targets')) {
+        return Promise.reject(migrationError);
+      }
+      if (source === 'ROLLBACK;') {
+        return Promise.reject(new Error('rollback failed'));
+      }
+      return Promise.resolve();
+    });
+
+    await expect(applyLocalMigrations(database)).rejects.toBe(migrationError);
+    expect(database.execAsync).toHaveBeenCalledWith('ROLLBACK;');
+  });
 });

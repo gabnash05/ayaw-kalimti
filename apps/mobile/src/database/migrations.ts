@@ -36,7 +36,8 @@ export async function applyLocalMigrations(
     }
     await database.execAsync('COMMIT;');
   } catch (error) {
-    await database.execAsync('ROLLBACK;');
+    // The original SQLite diagnosis controls whether recovery may delete data.
+    await database.execAsync('ROLLBACK;').catch(() => undefined);
     throw error;
   }
 }
