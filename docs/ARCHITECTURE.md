@@ -6,9 +6,9 @@
 |---|---|
 | System | Ayaw Kalimti |
 | Document status | Approved architecture baseline — pre-implementation |
-| Version | 0.1.9 |
+| Version | 0.1.10 |
 | Product owner | Project owner (name TBD) |
-| Last updated | 2026-08-22 |
+| Last updated | 2026-08-30 |
 | Initial content source | PRODUCT_SPEC.md version 0.1.23; current product constraints are version 0.1.27 |
 | Intended audience | Engineers, security reviewers, operators, testers, and AI development agents |
 
@@ -373,10 +373,11 @@ The intended repository organization is:
     │   ├── contracts/
     │   └── config/
     ├── database/
-    │   ├── migrations/
     │   └── seeds/
     ├── supabase/
-    │   └── config.toml
+    │   ├── config.toml
+    │   ├── migrations/
+    │   └── seed.sql
     ├── infra/
     │   └── terraform/
     │       ├── bootstrap/
@@ -503,3 +504,4 @@ Exact dependency versions, database connection budgets, container base digest, p
 | 0.1.7 | 2026-08-22 | Corrected the document-control reference to the approved Product Spec v0.1.25. | Resolves DOC-001 source-version drift; no architecture boundary or product behavior changed. |
 | 0.1.8 | 2026-08-22 | Aligned the geofence-adapter constraint with Product Spec v0.1.26: Home and Work/School Anchors use the fixed 300-metre MVP radius. | Implements the resolved product boundary without adding a user configuration surface. |
 | 0.1.9 | 2026-08-22 | Updated document control to Product Spec v0.1.27 after its resolved Task-list ordering decision. | Keeps architecture's source reference current; sorting behavior remains owned by the Product Spec. |
+| 0.1.10 | 2026-08-30 | Made `supabase/migrations/` the single authoritative location for reviewed PostgreSQL migrations and added the versioned local seed location to the repository strategy. | Aligns the approved SQL migration path with the pinned Supabase CLI replay workflow before application migrations exist; no product behavior or data model changed. |

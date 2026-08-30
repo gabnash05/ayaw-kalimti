@@ -8,7 +8,7 @@
 | Scope | Approved personal-first Android MVP only |
 | Product source | `PRODUCT_SPEC.md` v0.1.27 |
 | Domain source | `CONTEXT.md`, read in full on 2026-08-21 |
-| Technical source | `ARCHITECTURE.md` v0.1.9 |
+| Technical source | `ARCHITECTURE.md` v0.1.10 |
 | Repository policy | `AGENTS.md`, read in full on 2026-08-21 |
 | Output type | Planning artifact only; this plan adds no application code or product behavior |
 
@@ -159,7 +159,7 @@ This register records the implementation blockers identified at baseline freeze.
 - **Requirements / ACs:** FR-102–FR-145, FR-148–FR-150, FR-152–FR-179 as their persisted state requires; AC-001–AC-029, AC-033–AC-061 as applicable; PRIV-005, PRIV-013, PRIV-020; SEC-002, SEC-010, SEC-011.
 - **Architecture:** §§3.11, 4, 5, 6, 7.
 - **Dependencies:** MVP-003, MVP-005.
-- **Expected change surface:** `database/migrations/`, `database/seeds/`, Drizzle schema/repositories, RLS/ownership policies, migration job entry point.
+- **Expected change surface:** `supabase/migrations/`, `database/seeds/`, Drizzle schema/repositories, RLS/ownership policies, migration job entry point.
 - **Tests:** Empty/previous-state migration, interruption, uniqueness, two-account ownership, prohibited coordinate-column scan, retention timestamps, rollback/recovery rehearsal.
 - **Security/privacy:** Every user row has an enforceable owner; service-readable coordinate/geographic fields and decryption keys are structurally prohibited.
 - **Done:** Reviewed SQL builds the schema deterministically, migration runs only as singleton job, and schema tests prove isolation and coordinate absence.
