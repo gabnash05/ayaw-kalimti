@@ -26,3 +26,24 @@ jobs:
         run: corepack npm@11.12.1 ci
       - name: Run repository checks
         run: npm run check
+
+  local-integration:
+    name: Local integration checks
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up Node.js
+        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Enable the pinned package manager
+        run: corepack enable
+      - name: Install locked dependencies
+        run: corepack npm@11.12.1 ci
+      - name: Verify the deterministic local stack
+        run: npm run test:local-integration
+      - name: Stop the local stack
+        if: always()
+        run: npm run local:stop
