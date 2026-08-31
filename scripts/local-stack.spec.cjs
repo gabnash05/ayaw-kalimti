@@ -1,6 +1,15 @@
 /* global jest */
 const { describe, expect, test } = require('@jest/globals');
 const {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} = require('node:fs');
+const path = require('node:path');
+const {
   applyVersionedInputs,
   assertAuthFixtureSnapshot,
   assertComposeConfiguration,
@@ -9,11 +18,13 @@ const {
   assertProjectOwnership,
   collectStackVersions,
   composeArgs,
+  createMigrationProbeProject,
   execute,
   integrationFailure,
   migrationArguments,
   migrationEnvironment,
   parseCommand,
+  removeMigrationProbeProject,
   runIntegration,
   snapshotsMatch,
   stopStack,
@@ -138,6 +149,93 @@ describe('tracked local migrations', () => {
     });
 
     expect(order).toEqual(['migrations', 'seed']);
+  });
+
+  test('constructs and removes the temporary migration probe', () => {
+    const workDirectory = createMigrationProbeProject();
+
+    expect(existsSync(workDirectory)).toBe(true);
+    removeMigrationProbeProject(workDirectory);
+    expect(existsSync(workDirectory)).toBe(false);
+  });
+
+  test.each(['directory', 'file'])(
+    'removes a partial probe after a %s construction failure',
+    (failurePoint) => {
+      let workDirectory;
+      const removeProject = jest.fn(removeMigrationProbeProject);
+      const fileSystem = {
+        mkdirSync: (...args) => {
+          if (failurePoint === 'directory') {
+            throw new Error('native directory failure');
+          }
+          return mkdirSync(...args);
+        },
+        mkdtempSync: (prefix) => {
+          workDirectory = mkdtempSync(prefix);
+          return workDirectory;
+        },
+        readFileSync,
+        writeFileSync: (...args) => {
+          if (failurePoint === 'file') {
+            throw new Error('native file failure');
+          }
+          return writeFileSync(...args);
+        },
+      };
+
+      expect(() =>
+        createMigrationProbeProject({ fileSystem, removeProject }),
+      ).toThrow('Migration probe construction failed.');
+      expect(removeProject).toHaveBeenCalledTimes(1);
+      expect(existsSync(workDirectory)).toBe(false);
+    },
+  );
+
+  test('reports sanitized construction and cleanup failure', () => {
+    let workDirectory;
+    const removeProject = jest.fn(() => {
+      throw new Error('native cleanup failure');
+    });
+
+    try {
+      expect(() =>
+        createMigrationProbeProject({
+          fileSystem: {
+            mkdirSync: () => {
+              throw new Error('native directory failure');
+            },
+            mkdtempSync: (prefix) => {
+              workDirectory = mkdtempSync(prefix);
+              return workDirectory;
+            },
+            readFileSync,
+            writeFileSync,
+          },
+          removeProject,
+        }),
+      ).toThrow('Migration probe construction and cleanup both failed.');
+      expect(removeProject).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(workDirectory, { force: true, recursive: true });
+    }
+  });
+
+  test('rejects an escaped probe directory without attempting removal', () => {
+    const removeProject = jest.fn();
+
+    expect(() =>
+      createMigrationProbeProject({
+        fileSystem: {
+          mkdirSync,
+          mkdtempSync: () => path.resolve(__dirname),
+          readFileSync,
+          writeFileSync,
+        },
+        removeProject,
+      }),
+    ).toThrow('Migration probe construction failed.');
+    expect(removeProject).not.toHaveBeenCalled();
   });
 });
 

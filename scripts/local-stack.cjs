@@ -54,6 +54,12 @@ const EXPECTED_AUTH_SNAPSHOT = Object.freeze({
   users: '2:dcf94ac8d325b23f593ebe6cb20cd30d',
 });
 const MIGRATION_PROBE_VERSION = '20991231235959';
+const MIGRATION_PROBE_FILE_SYSTEM = Object.freeze({
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+});
 
 function execute(
   command,
@@ -510,43 +516,65 @@ function resolveMigrationProbeDirectory(workDirectory, errorMessage) {
   return resolvedWorkDirectory;
 }
 
-function createMigrationProbeProject() {
+function createMigrationProbeProject({
+  fileSystem = MIGRATION_PROBE_FILE_SYSTEM,
+  removeProject = removeMigrationProbeProject,
+} = {}) {
   const temporaryParent = path.resolve(os.tmpdir());
-  const workDirectory = mkdtempSync(
+  const workDirectory = fileSystem.mkdtempSync(
     path.join(temporaryParent, 'ayaw-kalimti-migrations-'),
   );
-  const resolvedWorkDirectory = resolveMigrationProbeDirectory(
-    workDirectory,
-    'The migration probe directory escaped its boundary.',
-  );
+  let resolvedWorkDirectory;
+  try {
+    resolvedWorkDirectory = resolveMigrationProbeDirectory(
+      workDirectory,
+      'The migration probe directory escaped its boundary.',
+    );
 
-  const supabaseDirectory = path.join(resolvedWorkDirectory, 'supabase');
-  const migrationDirectory = path.join(supabaseDirectory, 'migrations');
-  mkdirSync(migrationDirectory, { recursive: true, mode: 0o700 });
-  writeFileSync(
-    path.join(supabaseDirectory, 'config.toml'),
-    readFileSync(path.join(REPOSITORY_ROOT, 'supabase/config.toml'), 'utf8'),
-    { encoding: 'utf8', flag: 'wx', mode: 0o600 },
-  );
-  writeFileSync(path.join(supabaseDirectory, 'seed.sql'), '', {
-    encoding: 'utf8',
-    flag: 'wx',
-    mode: 0o600,
-  });
-  writeFileSync(
-    path.join(
-      migrationDirectory,
-      `${MIGRATION_PROBE_VERSION}_non_idempotent_probe.sql`,
-    ),
-    [
-      'create schema local_verification;',
-      'create table local_verification.migration_probe (id integer primary key);',
-      'insert into local_verification.migration_probe (id) values (1);',
-      '',
-    ].join('\n'),
-    { encoding: 'utf8', flag: 'wx', mode: 0o600 },
-  );
-  return resolvedWorkDirectory;
+    const supabaseDirectory = path.join(resolvedWorkDirectory, 'supabase');
+    const migrationDirectory = path.join(supabaseDirectory, 'migrations');
+    fileSystem.mkdirSync(migrationDirectory, {
+      recursive: true,
+      mode: 0o700,
+    });
+    fileSystem.writeFileSync(
+      path.join(supabaseDirectory, 'config.toml'),
+      fileSystem.readFileSync(
+        path.join(REPOSITORY_ROOT, 'supabase/config.toml'),
+        'utf8',
+      ),
+      { encoding: 'utf8', flag: 'wx', mode: 0o600 },
+    );
+    fileSystem.writeFileSync(path.join(supabaseDirectory, 'seed.sql'), '', {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+    fileSystem.writeFileSync(
+      path.join(
+        migrationDirectory,
+        `${MIGRATION_PROBE_VERSION}_non_idempotent_probe.sql`,
+      ),
+      [
+        'create schema local_verification;',
+        'create table local_verification.migration_probe (id integer primary key);',
+        'insert into local_verification.migration_probe (id) values (1);',
+        '',
+      ].join('\n'),
+      { encoding: 'utf8', flag: 'wx', mode: 0o600 },
+    );
+    return resolvedWorkDirectory;
+  } catch {
+    if (resolvedWorkDirectory === undefined) {
+      throw new Error('Migration probe construction failed.');
+    }
+    try {
+      removeProject(resolvedWorkDirectory);
+    } catch {
+      throw new Error('Migration probe construction and cleanup both failed.');
+    }
+    throw new Error('Migration probe construction failed.');
+  }
 }
 
 function removeMigrationProbeProject(workDirectory) {
@@ -707,11 +735,13 @@ module.exports = {
   assertProjectOwnership,
   collectStackVersions,
   composeArgs,
+  createMigrationProbeProject,
   execute,
   integrationFailure,
   migrationArguments,
   migrationEnvironment,
   parseCommand,
+  removeMigrationProbeProject,
   runIntegration,
   snapshotsMatch,
   stopStack,
