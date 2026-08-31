@@ -6,9 +6,9 @@
 |---|---|
 | System | Ayaw Kalimti |
 | Document status | Approved architecture baseline — pre-implementation |
-| Version | 0.1.9 |
+| Version | 0.1.11 |
 | Product owner | Project owner (name TBD) |
-| Last updated | 2026-08-22 |
+| Last updated | 2026-08-31 |
 | Initial content source | PRODUCT_SPEC.md version 0.1.23; current product constraints are version 0.1.27 |
 | Intended audience | Engineers, security reviewers, operators, testers, and AI development agents |
 
@@ -69,7 +69,7 @@ The phone detects platform Events and sends coordinate-free transition metadata.
 | Google Cloud Logging plus protected on-device diagnostics | Content-free API/worker operations, health signals, alerts, and explicitly shared mobile diagnostics | Fits the existing Google runtime, permits a seven-day application-log retention boundary, and avoids sending routine mobile telemetry to another processor | It deliberately omits hosted mobile crash reporting, replay, screenshots, and long-lived diagnostics. Reconsider a hosted crash provider only before public release and only if its actual plan can enforce the approved data and seven-day retention boundaries | Confirmed privacy-first MVP observability; Sentry excluded from MVP |
 | Deferred analytics provider | Possible implementation of later approved product analytics | Provider selection should follow demonstrated need rather than drive the MVP | No third-party product analytics in the MVP or first public release; any later provider requires a new explicit privacy, security, and data-processing review | Deferred; no provider selected |
 | npm workspaces | Repository organization | One lockfile and simple application/package grouping | Add Nx only if repository scale or CI measurements justify it | Confirmed initial approach |
-| Pinned Supabase CLI local stack plus application-owned provider fakes | Local PostgreSQL/Auth/RLS/migration work and deterministic Places, notification, queue, and scheduler tests | Reproducible local development without routine provider traffic, quota usage, shared cloud state, or sensitive test input disclosure | Docker-compatible runtime is required; fakes cannot prove provider compatibility, so controlled preview integration and physical-device tests remain mandatory | Confirmed |
+| Repository-owned Docker Compose local stack, pinned Supabase CLI migration tooling, and application-owned provider fakes | Local PostgreSQL/Auth/RLS/migration work and deterministic Places, notification, queue, and scheduler tests | Explicit per-service loopback mappings prevent the local stack from changing Docker Desktop defaults or exposing services while retaining provider-standard migration inputs | Docker-compatible runtime is required; fakes cannot prove provider compatibility, so controlled preview integration and physical-device tests remain mandatory | Confirmed |
 | GitHub Actions | Pull-request checks, reviewed Terraform plans, protected deployments, and release orchestration | Native repository controls, a usable free allowance, and short-lived Google Cloud authentication through GitHub OIDC and Workload Identity Federation | Workflows and third-party actions remain supply-chain inputs and require least privilege, immutable SHA pinning, environment protection, and review | Confirmed |
 | TypeScript strict mode, ESLint flat config with type-aware `typescript-eslint`, and Prettier | Static correctness, repository-wide code policy, and deterministic formatting | Current standard tooling catches unsafe TypeScript behavior and keeps formatting separate from semantic linting | Type-aware linting is slower; CI is authoritative and mandatory Git hooks are deferred unless measured developer errors justify them | Confirmed |
 | Terraform with a Google Cloud Storage remote backend | Google Cloud infrastructure, IAM, Cloud Run, Scheduler, Tasks, logging resources, budgets, and environment configuration | Widely supported declarative infrastructure with reviewable plans, provider locking, and GCS state locking/version recovery | Terraform state can contain sensitive values and the state bucket must exist before its backend. State access, bootstrap, drift, version upgrades, and licensing remain operational responsibilities; Supabase schema stays in reviewed SQL migrations | Confirmed; Terraform retained instead of OpenTofu |
@@ -200,7 +200,7 @@ The container handles termination signals, stops accepting new work, drains only
 
 ### 3.13 Local development and provider simulation
 
-The pinned project-local Supabase CLI starts the development PostgreSQL/Auth stack through a Docker-compatible runtime. Local configuration, migration inputs, RLS policies, and non-sensitive deterministic seed fixtures are versioned; generated local credentials and runtime data are not. The local stack binds only to the developer machine and MUST NOT be exposed as a production or shared internet service.
+Repository-owned Docker Compose starts only the pinned development PostgreSQL and Supabase Auth services through a Docker-compatible runtime. Every published port is explicitly mapped to `127.0.0.1`, and the wrapper verifies both the resolved configuration and running bindings. This project-scoped boundary MUST NOT change Docker Desktop's global port-binding behavior or affect another Docker project. The pinned project-local Supabase CLI remains available for provider-standard migration tooling; it does not own local container startup. Local configuration, migration inputs, RLS policies, and non-sensitive deterministic seed fixtures are versioned; generated local credentials and runtime data are not. The local stack MUST NOT be exposed as a production or shared internet service.
 
 Places, Maps-link resolution, FCM transport, Cloud Tasks, and Cloud Scheduler sit behind application-owned interfaces. Ordinary unit, component, integration, and migration tests use deterministic fakes or recorded synthetic contract fixtures containing no real Task, identity, coordinate, destination, token, or provider data. Failure fixtures cover timeout, malformed result, throttling, partial availability, duplicate invocation, retry, and permanent rejection without contacting a paid provider.
 
@@ -373,10 +373,11 @@ The intended repository organization is:
     │   ├── contracts/
     │   └── config/
     ├── database/
-    │   ├── migrations/
     │   └── seeds/
     ├── supabase/
-    │   └── config.toml
+    │   ├── config.toml
+    │   ├── migrations/
+    │   └── seed.sql
     ├── infra/
     │   └── terraform/
     │       ├── bootstrap/
@@ -503,3 +504,5 @@ Exact dependency versions, database connection budgets, container base digest, p
 | 0.1.7 | 2026-08-22 | Corrected the document-control reference to the approved Product Spec v0.1.25. | Resolves DOC-001 source-version drift; no architecture boundary or product behavior changed. |
 | 0.1.8 | 2026-08-22 | Aligned the geofence-adapter constraint with Product Spec v0.1.26: Home and Work/School Anchors use the fixed 300-metre MVP radius. | Implements the resolved product boundary without adding a user configuration surface. |
 | 0.1.9 | 2026-08-22 | Updated document control to Product Spec v0.1.27 after its resolved Task-list ordering decision. | Keeps architecture's source reference current; sorting behavior remains owned by the Product Spec. |
+| 0.1.10 | 2026-08-30 | Made `supabase/migrations/` the single authoritative location for reviewed PostgreSQL migrations and added the versioned local seed location to the repository strategy. | Aligns the approved SQL migration path with the pinned Supabase CLI replay workflow before application migrations exist; no product behavior or data model changed. |
+| 0.1.11 | 2026-08-31 | Replaced Supabase CLI-owned local container startup with repository-owned Docker Compose while retaining the pinned CLI for migration tooling. | Enforces explicit project-scoped `127.0.0.1` service mappings after the CLI-generated containers were observed publishing wildcard host bindings; Docker Desktop global behavior and unrelated Docker projects remain unchanged. |

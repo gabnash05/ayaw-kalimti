@@ -1,0 +1,9 @@
+{
+  "orchestration": "repository-owned-docker-compose",
+  "supabaseCli": "2.115.0",
+  "postgresMajor": 17,
+  "services": {
+    "auth": "public.ecr.aws/supabase/gotrue:v2.195.0",
+    "db": "public.ecr.aws/supabase/postgres:17.6.1.159"
+  }
+}

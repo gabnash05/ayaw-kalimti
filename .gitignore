@@ -9,3 +9,7 @@ coverage/
 *.tsbuildinfo
 android/
 ios/
+supabase/.branches/
+supabase/.temp/
+supabase/.env
+supabase/.env.*
