@@ -487,7 +487,10 @@ function verifyAuthTimestampPrecision({
     try {
       query();
     } catch (error) {
-      if (error instanceof Error && error.message === AUTH_FIXTURE_STATE_ERROR) {
+      if (
+        error instanceof Error &&
+        error.message === AUTH_FIXTURE_STATE_ERROR
+      ) {
         mutationRejected = true;
       } else {
         throw error;
@@ -698,14 +701,37 @@ function assertMigrationProbeRemoved() {
   );
 }
 
-function verifyTrackedMigrationReplay() {
-  const workDirectory = createMigrationProbeProject();
+function verifyTrackedMigrationReplay({
+  assertApplied = assertMigrationProbeAppliedOnce,
+  createProject = createMigrationProbeProject,
+  removeProject = removeMigrationProbeProject,
+  start = startStack,
+} = {}) {
+  const workDirectory = createProject();
+  let operationError;
   try {
-    startStack({ migrationWorkDirectory: workDirectory });
-    startStack({ migrationWorkDirectory: workDirectory });
-    assertMigrationProbeAppliedOnce();
-  } finally {
-    removeMigrationProbeProject(workDirectory);
+    start({ migrationWorkDirectory: workDirectory });
+    start({ migrationWorkDirectory: workDirectory });
+    assertApplied();
+  } catch (error) {
+    operationError = error;
+  }
+
+  let cleanupError;
+  try {
+    removeProject(workDirectory);
+  } catch (error) {
+    cleanupError = error;
+  }
+
+  if (operationError !== undefined && cleanupError !== undefined) {
+    throw new Error('Migration replay verification and cleanup both failed.');
+  }
+  if (operationError !== undefined) {
+    throw operationError;
+  }
+  if (cleanupError !== undefined) {
+    throw new Error('Migration probe cleanup failed.');
   }
 }
 
@@ -819,4 +845,5 @@ module.exports = {
   validateLocalEnvironment,
   verifyAuthHealth,
   verifyAuthTimestampPrecision,
+  verifyTrackedMigrationReplay,
 };

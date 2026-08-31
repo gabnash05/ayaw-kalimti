@@ -32,6 +32,7 @@ const {
   validateLocalEnvironment,
   verifyAuthHealth,
   verifyAuthTimestampPrecision,
+  verifyTrackedMigrationReplay,
 } = require('./local-stack.cjs');
 
 describe('local stack command boundary', () => {
@@ -238,6 +239,92 @@ describe('tracked local migrations', () => {
       }),
     ).toThrow('Migration probe construction failed.');
     expect(removeProject).not.toHaveBeenCalled();
+  });
+
+  test('runs the migration replay twice and removes the probe once', () => {
+    const start = jest.fn();
+    const assertApplied = jest.fn();
+    const removeProject = jest.fn();
+
+    expect(() =>
+      verifyTrackedMigrationReplay({
+        assertApplied,
+        createProject: () => 'synthetic-workdir',
+        removeProject,
+        start,
+      }),
+    ).not.toThrow();
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(start).toHaveBeenNthCalledWith(1, {
+      migrationWorkDirectory: 'synthetic-workdir',
+    });
+    expect(start).toHaveBeenNthCalledWith(2, {
+      migrationWorkDirectory: 'synthetic-workdir',
+    });
+    expect(assertApplied).toHaveBeenCalledTimes(1);
+    expect(removeProject).toHaveBeenCalledTimes(1);
+  });
+
+  test.each(['start', 'assertion'])(
+    'preserves a sanitized %s failure when cleanup succeeds',
+    (failurePoint) => {
+      const operationError = new Error('sanitized migration failure');
+      const start = jest.fn(() => {
+        if (failurePoint === 'start') {
+          throw operationError;
+        }
+      });
+      const assertApplied = jest.fn(() => {
+        if (failurePoint === 'assertion') {
+          throw operationError;
+        }
+      });
+      const removeProject = jest.fn();
+
+      expect(() =>
+        verifyTrackedMigrationReplay({
+          assertApplied,
+          createProject: () => 'synthetic-workdir',
+          removeProject,
+          start,
+        }),
+      ).toThrow(operationError);
+      expect(removeProject).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  test('reports a sanitized cleanup-only failure', () => {
+    const removeProject = jest.fn(() => {
+      throw new Error('native cleanup output');
+    });
+
+    expect(() =>
+      verifyTrackedMigrationReplay({
+        assertApplied: jest.fn(),
+        createProject: () => 'synthetic-workdir',
+        removeProject,
+        start: jest.fn(),
+      }),
+    ).toThrow('Migration probe cleanup failed.');
+    expect(removeProject).toHaveBeenCalledTimes(1);
+  });
+
+  test('reports both migration replay and cleanup failures', () => {
+    const removeProject = jest.fn(() => {
+      throw new Error('native cleanup output');
+    });
+
+    expect(() =>
+      verifyTrackedMigrationReplay({
+        assertApplied: jest.fn(),
+        createProject: () => 'synthetic-workdir',
+        removeProject,
+        start: () => {
+          throw new Error('native operation output');
+        },
+      }),
+    ).toThrow('Migration replay verification and cleanup both failed.');
+    expect(removeProject).toHaveBeenCalledTimes(1);
   });
 });
 
