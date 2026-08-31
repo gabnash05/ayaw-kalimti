@@ -1,6 +1,7 @@
 /* global jest */
 const { describe, expect, test } = require('@jest/globals');
 const {
+  applyVersionedInputs,
   assertComposeConfiguration,
   assertExpectedVersions,
   assertLoopbackPorts,
@@ -8,6 +9,8 @@ const {
   collectStackVersions,
   composeArgs,
   execute,
+  migrationArguments,
+  migrationEnvironment,
   parseCommand,
   snapshotsMatch,
   validateLocalEnvironment,
@@ -55,6 +58,64 @@ describe('local stack command boundary', () => {
     expect(() => execute('test', [], { label: 'Probe', run })).toThrow(
       'Probe failed without exposing command output.',
     );
+  });
+
+  test('passes child-only environment without mutating the parent process', () => {
+    const original = process.env.PGPASSWORD;
+    const run = jest.fn(() => ({ status: 0, stdout: '', stderr: '' }));
+
+    execute('test', [], {
+      environment: { PGPASSWORD: 'synthetic-child-only' },
+      run,
+    });
+
+    expect(run.mock.calls[0][2].env.PGPASSWORD).toBe('synthetic-child-only');
+    expect(process.env.PGPASSWORD).toBe(original);
+  });
+});
+
+describe('tracked local migrations', () => {
+  test('targets only the fixed loopback database through the pinned CLI', () => {
+    const args = migrationArguments('synthetic-workdir');
+
+    expect(args[0]).toMatch(
+      /node_modules[\\/]supabase[\\/]dist[\\/]supabase\.js$/u,
+    );
+    expect(args).toEqual(
+      expect.arrayContaining([
+        '--workdir',
+        'synthetic-workdir',
+        'migration',
+        'up',
+        '--db-url',
+        'postgresql://postgres@127.0.0.1:54322/postgres',
+        '--yes',
+      ]),
+    );
+    expect(args).not.toContain('--linked');
+    expect(args).not.toContain('--include-all');
+    expect(args.join(' ')).not.toMatch(/password|generated-local-key/iu);
+  });
+
+  test('supplies the generated password only through the child environment', () => {
+    expect(migrationEnvironment('synthetic-password')).toEqual({
+      DO_NOT_TRACK: '1',
+      PGPASSWORD: 'synthetic-password',
+      PGSSLMODE: 'disable',
+      SUPABASE_TELEMETRY_DISABLED: '1',
+    });
+  });
+
+  test('applies pending migrations before the idempotent seed', () => {
+    const order = [];
+
+    applyVersionedInputs({
+      applyMigrations: () => order.push('migrations'),
+      applySeed: () => order.push('seed'),
+      workDirectory: 'synthetic-workdir',
+    });
+
+    expect(order).toEqual(['migrations', 'seed']);
   });
 });
 

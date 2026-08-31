@@ -4,12 +4,14 @@ const {
   chmodSync,
   existsSync,
   lstatSync,
+  mkdtempSync,
   mkdirSync,
   readFileSync,
-  readdirSync,
+  rmSync,
   writeFileSync,
 } = require('node:fs');
 const http = require('node:http');
+const os = require('node:os');
 const path = require('node:path');
 
 const REPOSITORY_ROOT = path.resolve(__dirname, '..');
@@ -20,8 +22,12 @@ const COMPOSE_PATH = path.join(
 );
 const LOCAL_ENV_DIRECTORY = path.join(REPOSITORY_ROOT, 'supabase/.temp');
 const LOCAL_ENV_PATH = path.join(LOCAL_ENV_DIRECTORY, 'compose.env');
-const MIGRATION_DIRECTORY = path.join(REPOSITORY_ROOT, 'supabase/migrations');
 const SEED_PATH = path.join(REPOSITORY_ROOT, 'supabase/seed.sql');
+const SUPABASE_CLI_PATH = path.join(
+  REPOSITORY_ROOT,
+  'node_modules/supabase/dist/supabase.js',
+);
+const LOCAL_DATABASE_URL = 'postgresql://postgres@127.0.0.1:54322/postgres';
 const EXPECTED_CLI_VERSION = '2.115.0';
 const EXPECTED_VERSION_PATH = path.join(
   REPOSITORY_ROOT,
@@ -30,20 +36,24 @@ const EXPECTED_VERSION_PATH = path.join(
 const COMMANDS = new Set(['integration', 'reset', 'start', 'stop', 'verify']);
 const LOCAL_ENV_PATTERN =
   /^POSTGRES_PASSWORD=[0-9a-f]{48}\r?\nJWT_SECRET=[0-9a-f]{64}\r?\n$/u;
+const MIGRATION_PROBE_VERSION = '20991231235959';
 
 function execute(
   command,
   args,
   {
     allowFailure = false,
+    environment = {},
     input,
     label = 'Local operation',
     run = spawnSync,
+    workingDirectory = REPOSITORY_ROOT,
   } = {},
 ) {
   const result = run(command, args, {
-    cwd: REPOSITORY_ROOT,
+    cwd: workingDirectory,
     encoding: 'utf8',
+    env: { ...process.env, ...environment },
     input,
     maxBuffer: 64 * 1024 * 1024,
     shell: false,
@@ -193,21 +203,47 @@ function runSql(contents, label, username = 'postgres') {
   );
 }
 
-function applyVersionedSql() {
-  const migrations = readdirSync(MIGRATION_DIRECTORY, {
-    withFileTypes: true,
-  })
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.sql'))
-    .map((entry) => entry.name)
-    .sort();
+function migrationArguments(workDirectory = REPOSITORY_ROOT) {
+  return [
+    SUPABASE_CLI_PATH,
+    '--workdir',
+    workDirectory,
+    'migration',
+    'up',
+    '--db-url',
+    LOCAL_DATABASE_URL,
+    '--yes',
+  ];
+}
 
-  for (const migration of migrations) {
-    runSql(
-      readFileSync(path.join(MIGRATION_DIRECTORY, migration), 'utf8'),
-      'Local migration',
-    );
-  }
-  runSql(readFileSync(SEED_PATH, 'utf8'), 'Local seed');
+function migrationEnvironment(password) {
+  return {
+    DO_NOT_TRACK: '1',
+    PGPASSWORD: password,
+    PGSSLMODE: 'disable',
+    SUPABASE_TELEMETRY_DISABLED: '1',
+  };
+}
+
+function applyPendingMigrations({
+  run = spawnSync,
+  workDirectory = REPOSITORY_ROOT,
+} = {}) {
+  const { POSTGRES_PASSWORD: password } = readLocalEnvironment();
+  execute(process.execPath, migrationArguments(workDirectory), {
+    environment: migrationEnvironment(password),
+    label: 'Local migration',
+    run,
+  });
+}
+
+function applyVersionedInputs({
+  applyMigrations = applyPendingMigrations,
+  applySeed = () => runSql(readFileSync(SEED_PATH, 'utf8'), 'Local seed'),
+  workDirectory = REPOSITORY_ROOT,
+} = {}) {
+  applyMigrations({ workDirectory });
+  applySeed();
 }
 
 function configureAuthRole() {
@@ -219,14 +255,14 @@ function configureAuthRole() {
   );
 }
 
-function startStack() {
+function startStack({ migrationWorkDirectory = REPOSITORY_ROOT } = {}) {
   runDocker(['info', '--format', '{{.ServerVersion}}']);
   ensureLocalEnvironment();
   verifyComposeConfiguration();
   runCompose(['up', '--detach', '--wait', '--wait-timeout', '120', 'db']);
   configureAuthRole();
   runCompose(['up', '--detach', '--wait', '--wait-timeout', '120', 'auth']);
-  applyVersionedSql();
+  applyVersionedInputs({ workDirectory: migrationWorkDirectory });
 }
 
 function resetStack() {
@@ -401,12 +437,130 @@ function snapshotsMatch(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function resolveMigrationProbeDirectory(workDirectory, errorMessage) {
+  const temporaryParent = path.resolve(os.tmpdir());
+  const resolvedWorkDirectory = path.resolve(workDirectory);
+  if (
+    path.dirname(resolvedWorkDirectory) !== temporaryParent ||
+    !path.basename(resolvedWorkDirectory).startsWith('ayaw-kalimti-migrations-')
+  ) {
+    throw new Error(errorMessage);
+  }
+  assertOrdinaryDirectory(resolvedWorkDirectory);
+  return resolvedWorkDirectory;
+}
+
+function createMigrationProbeProject() {
+  const temporaryParent = path.resolve(os.tmpdir());
+  const workDirectory = mkdtempSync(
+    path.join(temporaryParent, 'ayaw-kalimti-migrations-'),
+  );
+  const resolvedWorkDirectory = resolveMigrationProbeDirectory(
+    workDirectory,
+    'The migration probe directory escaped its boundary.',
+  );
+
+  const supabaseDirectory = path.join(resolvedWorkDirectory, 'supabase');
+  const migrationDirectory = path.join(supabaseDirectory, 'migrations');
+  mkdirSync(migrationDirectory, { recursive: true, mode: 0o700 });
+  writeFileSync(
+    path.join(supabaseDirectory, 'config.toml'),
+    readFileSync(path.join(REPOSITORY_ROOT, 'supabase/config.toml'), 'utf8'),
+    { encoding: 'utf8', flag: 'wx', mode: 0o600 },
+  );
+  writeFileSync(path.join(supabaseDirectory, 'seed.sql'), '', {
+    encoding: 'utf8',
+    flag: 'wx',
+    mode: 0o600,
+  });
+  writeFileSync(
+    path.join(
+      migrationDirectory,
+      `${MIGRATION_PROBE_VERSION}_non_idempotent_probe.sql`,
+    ),
+    [
+      'create schema local_verification;',
+      'create table local_verification.migration_probe (id integer primary key);',
+      'insert into local_verification.migration_probe (id) values (1);',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', flag: 'wx', mode: 0o600 },
+  );
+  return resolvedWorkDirectory;
+}
+
+function removeMigrationProbeProject(workDirectory) {
+  const resolvedWorkDirectory = resolveMigrationProbeDirectory(
+    workDirectory,
+    'The migration probe cleanup boundary is invalid.',
+  );
+  rmSync(resolvedWorkDirectory, { recursive: true });
+}
+
+function assertMigrationProbeAppliedOnce() {
+  const query = [
+    "select (select count(*) from supabase_migrations.schema_migrations where version = '",
+    MIGRATION_PROBE_VERSION,
+    "')::text || ':' || (select count(*) from local_verification.migration_probe)::text;",
+  ].join('');
+  const result = runCompose([
+    'exec',
+    '--no-TTY',
+    'db',
+    'psql',
+    '--username',
+    'postgres',
+    '--dbname',
+    'postgres',
+    '--tuples-only',
+    '--no-align',
+    '--command',
+    query,
+  ]);
+  if (result.stdout.trim() !== '1:1') {
+    throw new Error(
+      'The tracked migration probe was not applied exactly once.',
+    );
+  }
+}
+
+function assertMigrationProbeRemoved() {
+  runSql(
+    [
+      'do $$',
+      'declare probe_history_count integer := 0;',
+      'begin',
+      "if to_regclass('supabase_migrations.schema_migrations') is not null then",
+      `execute 'select count(*) from supabase_migrations.schema_migrations where version = ''${MIGRATION_PROBE_VERSION}''' into probe_history_count;`,
+      'end if;',
+      "if to_regclass('local_verification.migration_probe') is not null or probe_history_count <> 0 then",
+      "raise exception 'synthetic migration probe remains';",
+      'end if;',
+      'end $$;',
+    ].join('\n'),
+    'Migration probe cleanup verification',
+  );
+}
+
+function verifyTrackedMigrationReplay() {
+  const workDirectory = createMigrationProbeProject();
+  try {
+    startStack({ migrationWorkDirectory: workDirectory });
+    startStack({ migrationWorkDirectory: workDirectory });
+    assertMigrationProbeAppliedOnce();
+  } finally {
+    removeMigrationProbeProject(workDirectory);
+  }
+}
+
 async function runIntegration() {
   let operationError;
   try {
     resetStack();
     const first = await verifyStack();
+    verifyTrackedMigrationReplay();
     resetStack();
+    assertMigrationProbeRemoved();
     const second = await verifyStack();
     if (!snapshotsMatch(first, second)) {
       throw new Error('Repeated local resets produced different state.');
@@ -462,6 +616,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  applyVersionedInputs,
   assertComposeConfiguration,
   assertExpectedVersions,
   assertLoopbackPorts,
@@ -469,6 +624,8 @@ module.exports = {
   collectStackVersions,
   composeArgs,
   execute,
+  migrationArguments,
+  migrationEnvironment,
   parseCommand,
   snapshotsMatch,
   validateLocalEnvironment,
