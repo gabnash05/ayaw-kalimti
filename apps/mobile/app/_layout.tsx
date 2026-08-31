@@ -1,5 +1,11 @@
 import { Stack } from 'expo-router';
 
+import { ProtectedStorageGate } from '../src/database/storage-gate.js';
+
 export default function RootLayout() {
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <ProtectedStorageGate>
+      <Stack screenOptions={{ headerShown: false }} />
+    </ProtectedStorageGate>
+  );
 }

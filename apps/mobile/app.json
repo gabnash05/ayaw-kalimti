@@ -5,6 +5,15 @@
     "version": "0.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "plugins": ["expo-router"]
+    "plugins": [
+      "expo-router",
+      ["expo-sqlite", { "useSQLCipher": true }],
+      ["expo-secure-store", { "configureAndroidBackup": true }],
+      ["expo-build-properties", { "android": { "minSdkVersion": 30 } }]
+    ],
+    "android": {
+      "allowBackup": false,
+      "package": "io.github.gabnash.ayawkalimti"
+    }
   }
 }
