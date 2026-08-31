@@ -119,11 +119,11 @@ This register records the implementation blockers identified at baseline freeze.
 
 #### MVP-003 — Build the deterministic local integration environment
 
-- **Objective:** Provide pinned local Supabase/Postgres/Auth plus application-owned fakes for Places, Maps links, FCM, Tasks, and Scheduler.
+- **Objective:** Provide pinned local Supabase Postgres/Auth through repository-owned Docker Compose, pinned Supabase CLI migration tooling, and application-owned fakes for Places, Maps links, FCM, Tasks, and Scheduler.
 - **Requirements / ACs:** REL-008; AC-015, AC-029; foundation for provider-related ACs.
 - **Architecture:** §§3.13, 5, 7; implementation rule for fakes and explicit preview tests.
 - **Dependencies:** MVP-002.
-- **Expected change surface:** `supabase/config.toml`, non-sensitive seeds, `apps/api/src/shared/providers/`, test fixtures, local environment scripts, `.env.example`.
+- **Expected change surface:** `supabase/config.toml`, local Compose configuration, non-sensitive seeds, `apps/api/src/shared/providers/`, test fixtures, local environment scripts, `.env.example`.
 - **Tests:** Rebuild local stack from versioned inputs; default tests prove zero real-provider traffic; fakes cover timeout, throttle, duplicate, malformed, and permanent rejection.
 - **Security/privacy:** Synthetic identities/tasks/locations only; local services bind locally; generated credentials and runtime data ignored.
 - **Done:** Ordinary tests are deterministic, no-charge, and offline from paid providers; real preview tests are separately named and opt-in.
