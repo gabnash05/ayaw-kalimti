@@ -8,7 +8,7 @@
 | Scope | Approved personal-first Android MVP only |
 | Product source | `PRODUCT_SPEC.md` v0.1.27 |
 | Domain source | `CONTEXT.md`, read in full on 2026-08-21 |
-| Technical source | `ARCHITECTURE.md` v0.1.10 |
+| Technical source | `ARCHITECTURE.md` v0.1.11 |
 | Repository policy | `AGENTS.md`, read in full on 2026-08-21 |
 | Output type | Planning artifact only; this plan adds no application code or product behavior |
 
