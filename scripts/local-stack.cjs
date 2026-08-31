@@ -36,6 +36,17 @@ const EXPECTED_VERSION_PATH = path.join(
 const COMMANDS = new Set(['integration', 'reset', 'start', 'stop', 'verify']);
 const LOCAL_ENV_PATTERN =
   /^POSTGRES_PASSWORD=[0-9a-f]{48}\r?\nJWT_SECRET=[0-9a-f]{64}\r?\n$/u;
+const EXPECTED_AUTH_SNAPSHOT = Object.freeze({
+  auditLogEntries: 0,
+  flowState: 0,
+  identities: 0,
+  mfaChallenges: 0,
+  mfaFactors: 0,
+  oneTimeTokens: 0,
+  refreshTokens: 0,
+  sessions: 0,
+  users: '2:6730e56c630e37d43393c3d464e2c54d',
+});
 const MIGRATION_PROBE_VERSION = '20991231235959';
 
 function execute(
@@ -357,14 +368,34 @@ function assertExpectedVersions(actualServices, expected) {
   }
 }
 
-function queryFixtureFingerprint() {
+function assertAuthFixtureSnapshot(snapshot) {
+  const expectedEntries = Object.entries(EXPECTED_AUTH_SNAPSHOT);
+  if (
+    snapshot === null ||
+    typeof snapshot !== 'object' ||
+    Object.keys(snapshot).length !== expectedEntries.length ||
+    expectedEntries.some(([key, value]) => snapshot[key] !== value)
+  ) {
+    throw new Error('The synthetic Auth fixture state is not exact.');
+  }
+}
+
+function queryAuthFixtureSnapshot() {
   const query = [
-    "select count(*)::text || ':' || md5(string_agg(",
+    'select json_build_object(',
+    "'auditLogEntries', (select count(*) from auth.audit_log_entries),",
+    "'flowState', (select count(*) from auth.flow_state),",
+    "'identities', (select count(*) from auth.identities),",
+    "'mfaChallenges', (select count(*) from auth.mfa_challenges),",
+    "'mfaFactors', (select count(*) from auth.mfa_factors),",
+    "'oneTimeTokens', (select count(*) from auth.one_time_tokens),",
+    "'refreshTokens', (select count(*) from auth.refresh_tokens),",
+    "'sessions', (select count(*) from auth.sessions),",
+    "'users', (select count(*)::text || ':' || coalesce(md5(string_agg(",
     "id::text || ':' || email || ':' ||",
     "to_char(created_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS'),",
-    "'|' order by id))",
-    'from auth.users',
-    "where email in ('fixture-a@example.invalid', 'fixture-b@example.invalid');",
+    "'|' order by id)), md5('')) from auth.users)",
+    ');',
   ].join(' ');
   const result = runCompose([
     'exec',
@@ -380,11 +411,14 @@ function queryFixtureFingerprint() {
     '--command',
     query,
   ]);
-  const fingerprint = result.stdout.trim();
-  if (!fingerprint.startsWith('2:')) {
-    throw new Error('The synthetic Auth fixture set is incomplete.');
+  let snapshot;
+  try {
+    snapshot = JSON.parse(result.stdout.trim());
+  } catch {
+    throw new Error('The synthetic Auth fixture state is unreadable.');
   }
-  return fingerprint;
+  assertAuthFixtureSnapshot(snapshot);
+  return snapshot;
 }
 
 function requestAuthHealth() {
@@ -428,9 +462,9 @@ async function verifyStack() {
   assertLoopbackPorts(containers);
   const services = collectStackVersions(containers);
   assertExpectedVersions(services, readExpectedVersions());
-  const fixtureFingerprint = queryFixtureFingerprint();
+  const auth = queryAuthFixtureSnapshot();
   await verifyAuthHealth();
-  return { fixtureFingerprint, services };
+  return { auth, services };
 }
 
 function snapshotsMatch(left, right) {
@@ -617,6 +651,7 @@ if (require.main === module) {
 
 module.exports = {
   applyVersionedInputs,
+  assertAuthFixtureSnapshot,
   assertComposeConfiguration,
   assertExpectedVersions,
   assertLoopbackPorts,

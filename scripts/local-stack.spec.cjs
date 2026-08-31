@@ -2,6 +2,7 @@
 const { describe, expect, test } = require('@jest/globals');
 const {
   applyVersionedInputs,
+  assertAuthFixtureSnapshot,
   assertComposeConfiguration,
   assertExpectedVersions,
   assertLoopbackPorts,
@@ -224,6 +225,38 @@ describe('local Auth readiness', () => {
   });
 });
 
+describe('exact local Auth fixture state', () => {
+  const expected = {
+    auditLogEntries: 0,
+    flowState: 0,
+    identities: 0,
+    mfaChallenges: 0,
+    mfaFactors: 0,
+    oneTimeTokens: 0,
+    refreshTokens: 0,
+    sessions: 0,
+    users: '2:6730e56c630e37d43393c3d464e2c54d',
+  };
+
+  test('accepts only the complete fixed non-login fixture snapshot', () => {
+    expect(() => assertAuthFixtureSnapshot(expected)).not.toThrow();
+  });
+
+  test.each([
+    ['missing fixture', { ...expected, users: '1:synthetic' }],
+    ['changed fixture', { ...expected, users: '2:changed' }],
+    ['unexpected third user', { ...expected, users: '3:synthetic' }],
+    ['residual identity', { ...expected, identities: 1 }],
+    ['residual session', { ...expected, sessions: 1 }],
+    ['residual refresh token', { ...expected, refreshTokens: 1 }],
+    ['additional field', { ...expected, unexpected: 1 }],
+  ])('rejects %s state', (_scenario, snapshot) => {
+    expect(() => assertAuthFixtureSnapshot(snapshot)).toThrow(
+      'The synthetic Auth fixture state is not exact.',
+    );
+  });
+});
+
 describe('pinned stack evidence', () => {
   const containers = [
     {
@@ -278,7 +311,7 @@ describe('pinned stack evidence', () => {
 
 test('compares deterministic reset snapshots exactly', () => {
   const snapshot = {
-    fixtureFingerprint: 'synthetic',
+    auth: { users: 'synthetic' },
     services: { auth: 'example/auth:1' },
   };
 
@@ -286,7 +319,7 @@ test('compares deterministic reset snapshots exactly', () => {
   expect(
     snapshotsMatch(snapshot, {
       ...snapshot,
-      fixtureFingerprint: 'different',
+      auth: { users: 'different' },
     }),
   ).toBe(false);
 });
