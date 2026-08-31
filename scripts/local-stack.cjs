@@ -36,6 +36,10 @@ const EXPECTED_VERSION_PATH = path.join(
 const COMMANDS = new Set(['integration', 'reset', 'start', 'stop', 'verify']);
 const LOCAL_ENV_PATTERN =
   /^POSTGRES_PASSWORD=[0-9a-f]{48}\r?\nJWT_SECRET=[0-9a-f]{64}\r?\n$/u;
+const CLEANUP_ENVIRONMENT = Object.freeze({
+  JWT_SECRET: 'local-cleanup-placeholder',
+  POSTGRES_PASSWORD: 'local-cleanup-placeholder',
+});
 const EXPECTED_AUTH_SNAPSHOT = Object.freeze({
   auditLogEntries: 0,
   flowState: 0,
@@ -84,23 +88,20 @@ function runDocker(args, options = {}) {
   });
 }
 
-function composeArgs(args) {
-  return [
-    'compose',
-    '--project-name',
-    COMPOSE_PROJECT,
-    '--env-file',
-    LOCAL_ENV_PATH,
-    '--file',
-    COMPOSE_PATH,
-    ...args,
-  ];
+function composeArgs(args, { includeEnvironmentFile = true } = {}) {
+  const command = ['compose', '--project-name', COMPOSE_PROJECT];
+  if (includeEnvironmentFile) {
+    command.push('--env-file', LOCAL_ENV_PATH);
+  }
+  command.push('--file', COMPOSE_PATH);
+  return [...command, ...args];
 }
 
 function runCompose(args, options = {}) {
-  return runDocker(composeArgs(args), {
+  const { includeEnvironmentFile = true, ...executeOptions } = options;
+  return runDocker(composeArgs(args, { includeEnvironmentFile }), {
     label: 'Local Compose operation',
-    ...options,
+    ...executeOptions,
   });
 }
 
@@ -283,13 +284,21 @@ function resetStack() {
   startStack();
 }
 
-function stopStack({ allowFailure = false, clean = false } = {}) {
-  ensureLocalEnvironment();
+function stopStack({
+  allowFailure = false,
+  clean = false,
+  run = spawnSync,
+} = {}) {
   const args = ['down', '--remove-orphans'];
   if (clean) {
     args.push('--volumes');
   }
-  return runCompose(args, { allowFailure });
+  return runCompose(args, {
+    allowFailure,
+    environment: CLEANUP_ENVIRONMENT,
+    includeEnvironmentFile: false,
+    run,
+  });
 }
 
 function listProjectContainers() {
@@ -587,15 +596,35 @@ function verifyTrackedMigrationReplay() {
   }
 }
 
-async function runIntegration() {
+function integrationFailure(operationError, cleanup) {
+  const cleanupFailed = cleanup.error || cleanup.status !== 0;
+  if (operationError !== undefined && cleanupFailed) {
+    return new Error('Local integration and cleanup both failed.');
+  }
+  if (operationError !== undefined) {
+    return operationError;
+  }
+  if (cleanupFailed) {
+    return new Error('Local stack cleanup failed.');
+  }
+  return undefined;
+}
+
+async function runIntegration({
+  assertProbeRemoved = assertMigrationProbeRemoved,
+  cleanup = () => stopStack({ allowFailure: true, clean: true }),
+  reset = resetStack,
+  verify = verifyStack,
+  verifyMigrationReplay = verifyTrackedMigrationReplay,
+} = {}) {
   let operationError;
   try {
-    resetStack();
-    const first = await verifyStack();
-    verifyTrackedMigrationReplay();
-    resetStack();
-    assertMigrationProbeRemoved();
-    const second = await verifyStack();
+    reset();
+    const first = await verify();
+    verifyMigrationReplay();
+    reset();
+    assertProbeRemoved();
+    const second = await verify();
     if (!snapshotsMatch(first, second)) {
       throw new Error('Repeated local resets produced different state.');
     }
@@ -603,12 +632,15 @@ async function runIntegration() {
     operationError = error;
   }
 
-  const cleanup = stopStack({ allowFailure: true, clean: true });
-  if (operationError !== undefined) {
-    throw operationError;
+  let cleanupResult;
+  try {
+    cleanupResult = cleanup();
+  } catch (error) {
+    cleanupResult = { error, status: null };
   }
-  if (cleanup.error || cleanup.status !== 0) {
-    throw new Error('Local stack cleanup failed.');
+  const failure = integrationFailure(operationError, cleanupResult);
+  if (failure !== undefined) {
+    throw failure;
   }
 }
 
@@ -659,10 +691,13 @@ module.exports = {
   collectStackVersions,
   composeArgs,
   execute,
+  integrationFailure,
   migrationArguments,
   migrationEnvironment,
   parseCommand,
+  runIntegration,
   snapshotsMatch,
+  stopStack,
   validateLocalEnvironment,
   verifyAuthHealth,
 };

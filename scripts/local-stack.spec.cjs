@@ -10,10 +10,13 @@ const {
   collectStackVersions,
   composeArgs,
   execute,
+  integrationFailure,
   migrationArguments,
   migrationEnvironment,
   parseCommand,
+  runIntegration,
   snapshotsMatch,
+  stopStack,
   validateLocalEnvironment,
   verifyAuthHealth,
 } = require('./local-stack.cjs');
@@ -47,6 +50,24 @@ describe('local stack command boundary', () => {
         'down',
       ]),
     );
+  });
+
+  test('cleanup remains project-scoped without reading the generated environment', () => {
+    const args = composeArgs(['down', '--remove-orphans'], {
+      includeEnvironmentFile: false,
+    });
+
+    expect(args).toEqual(
+      expect.arrayContaining([
+        '--project-name',
+        'ayaw-kalimti-local',
+        '--file',
+        expect.stringMatching(/supabase[\\/]docker-compose\.local\.yml$/u),
+        'down',
+        '--remove-orphans',
+      ]),
+    );
+    expect(args).not.toContain('--env-file');
   });
 
   test('does not expose captured child-process output on failure', () => {
@@ -254,6 +275,95 @@ describe('exact local Auth fixture state', () => {
     expect(() => assertAuthFixtureSnapshot(snapshot)).toThrow(
       'The synthetic Auth fixture state is not exact.',
     );
+  });
+});
+
+describe('local integration cleanup', () => {
+  const successfulCleanup = { status: 0 };
+  const failedCleanup = { status: 1 };
+
+  test('reports an operation failure when cleanup succeeds', () => {
+    const operationError = new Error('sanitized operation failure');
+
+    expect(integrationFailure(operationError, successfulCleanup)).toBe(
+      operationError,
+    );
+  });
+
+  test('reports cleanup failure when the operation succeeds', () => {
+    expect(integrationFailure(undefined, failedCleanup)).toEqual(
+      new Error('Local stack cleanup failed.'),
+    );
+  });
+
+  test('reports both failures instead of masking cleanup failure', () => {
+    expect(
+      integrationFailure(new Error('operation failed'), failedCleanup),
+    ).toEqual(new Error('Local integration and cleanup both failed.'));
+  });
+
+  test('cleanup does not depend on a generated environment file', () => {
+    const run = jest.fn(() => ({ status: 0, stdout: '', stderr: '' }));
+
+    expect(stopStack({ clean: true, run })).toEqual(
+      expect.objectContaining({ status: 0 }),
+    );
+    const [command, args, options] = run.mock.calls[0];
+    expect(command).toBe('docker');
+    expect(args).toEqual(
+      expect.arrayContaining(['down', '--remove-orphans', '--volumes']),
+    );
+    expect(args).not.toContain('--env-file');
+    expect(options.env).toEqual(
+      expect.objectContaining({
+        JWT_SECRET: 'local-cleanup-placeholder',
+        POSTGRES_PASSWORD: 'local-cleanup-placeholder',
+      }),
+    );
+  });
+
+  test('attempts cleanup once after an operation failure', async () => {
+    const cleanup = jest.fn(() => successfulCleanup);
+
+    await expect(
+      runIntegration({
+        cleanup,
+        reset: () => {
+          throw new Error('sanitized operation failure');
+        },
+      }),
+    ).rejects.toThrow('sanitized operation failure');
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  test('preserves both failures when cleanup throws', async () => {
+    const cleanup = jest.fn(() => {
+      throw new Error('native cleanup output');
+    });
+
+    await expect(
+      runIntegration({
+        cleanup,
+        reset: () => {
+          throw new Error('sanitized operation failure');
+        },
+      }),
+    ).rejects.toThrow('Local integration and cleanup both failed.');
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  test('reports a cleanup-only spawn failure after successful work', async () => {
+    const snapshot = { auth: 'synthetic', services: {} };
+
+    await expect(
+      runIntegration({
+        assertProbeRemoved: jest.fn(),
+        cleanup: () => ({ error: new Error('spawn failed'), status: null }),
+        reset: jest.fn(),
+        verify: jest.fn().mockResolvedValue(snapshot),
+        verifyMigrationReplay: jest.fn(),
+      }),
+    ).rejects.toThrow('Local stack cleanup failed.');
   });
 });
 
