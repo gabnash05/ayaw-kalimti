@@ -40,6 +40,8 @@ const CLEANUP_ENVIRONMENT = Object.freeze({
   JWT_SECRET: 'local-cleanup-placeholder',
   POSTGRES_PASSWORD: 'local-cleanup-placeholder',
 });
+const AUTH_FIXTURE_STATE_ERROR =
+  'The synthetic Auth fixture state is not exact.';
 const EXPECTED_AUTH_SNAPSHOT = Object.freeze({
   auditLogEntries: 0,
   credentialedUsers: 0,
@@ -51,8 +53,10 @@ const EXPECTED_AUTH_SNAPSHOT = Object.freeze({
   pendingAuthArtifacts: 0,
   refreshTokens: 0,
   sessions: 0,
-  users: '2:dcf94ac8d325b23f593ebe6cb20cd30d',
+  users: '2:ecdaed87f250b598b10fb6189157d0b0',
 });
+const AUTH_TIMESTAMP_FIXTURE_ID = '00000000-0000-4000-8000-000000000001';
+const AUTH_TIMESTAMP_BASELINE = '2000-01-01 00:00:00+00';
 const MIGRATION_PROBE_VERSION = '20991231235959';
 const MIGRATION_PROBE_FILE_SYSTEM = Object.freeze({
   mkdirSync,
@@ -393,12 +397,12 @@ function assertAuthFixtureSnapshot(snapshot) {
     Object.keys(snapshot).length !== expectedEntries.length ||
     expectedEntries.some(([key, value]) => snapshot[key] !== value)
   ) {
-    throw new Error('The synthetic Auth fixture state is not exact.');
+    throw new Error(AUTH_FIXTURE_STATE_ERROR);
   }
 }
 
-function queryAuthFixtureSnapshot() {
-  const query = [
+function authFixtureSnapshotQuery() {
+  return [
     'select json_build_object(',
     "'auditLogEntries', (select count(*) from auth.audit_log_entries),",
     "'credentialedUsers', (select count(*) from auth.users where",
@@ -423,12 +427,16 @@ function queryAuthFixtureSnapshot() {
     "'sessions', (select count(*) from auth.sessions),",
     "'users', (select count(*)::text || ':' || coalesce(md5(string_agg(",
     "id::text || ':' || email || ':' ||",
-    "to_char(created_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS')",
-    "|| ':' || to_char(updated_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS')",
+    "to_char(created_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS.US')",
+    "|| ':' || to_char(updated_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS.US')",
     "|| ':' || raw_app_meta_data::text || ':' || raw_user_meta_data::text,",
     "'|' order by id)), md5('')) from auth.users)",
     ');',
   ].join(' ');
+}
+
+function queryAuthFixtureSnapshot() {
+  const query = authFixtureSnapshotQuery();
   const result = runCompose([
     'exec',
     '--no-TTY',
@@ -451,6 +459,66 @@ function queryAuthFixtureSnapshot() {
   }
   assertAuthFixtureSnapshot(snapshot);
   return snapshot;
+}
+
+function mutateAuthFixtureTimestamp() {
+  runSql(
+    `update auth.users set updated_at = updated_at + interval '1 microsecond' where id = '${AUTH_TIMESTAMP_FIXTURE_ID}';`,
+    'Auth timestamp precision mutation',
+  );
+}
+
+function restoreAuthFixtureTimestamp() {
+  runSql(
+    `update auth.users set updated_at = '${AUTH_TIMESTAMP_BASELINE}' where id = '${AUTH_TIMESTAMP_FIXTURE_ID}';`,
+    'Auth timestamp precision restoration',
+  );
+}
+
+function verifyAuthTimestampPrecision({
+  mutate = mutateAuthFixtureTimestamp,
+  query = queryAuthFixtureSnapshot,
+  restore = restoreAuthFixtureTimestamp,
+} = {}) {
+  let verificationError;
+  try {
+    mutate();
+    let mutationRejected = false;
+    try {
+      query();
+    } catch (error) {
+      if (error instanceof Error && error.message === AUTH_FIXTURE_STATE_ERROR) {
+        mutationRejected = true;
+      } else {
+        throw error;
+      }
+    }
+    if (!mutationRejected) {
+      throw new Error('The timestamp precision mutation was not detected.');
+    }
+  } catch (error) {
+    verificationError = error;
+  }
+
+  let restorationError;
+  try {
+    restore();
+    query();
+  } catch (error) {
+    restorationError = error;
+  }
+
+  if (verificationError !== undefined && restorationError !== undefined) {
+    throw new Error(
+      'Auth timestamp precision verification and restoration both failed.',
+    );
+  }
+  if (verificationError !== undefined) {
+    throw new Error('Auth timestamp precision verification failed.');
+  }
+  if (restorationError !== undefined) {
+    throw new Error('Auth timestamp precision fixture restoration failed.');
+  }
 }
 
 function requestAuthHealth() {
@@ -660,12 +728,14 @@ async function runIntegration({
   cleanup = () => stopStack({ allowFailure: true, clean: true }),
   reset = resetStack,
   verify = verifyStack,
+  verifyAuthPrecision = verifyAuthTimestampPrecision,
   verifyMigrationReplay = verifyTrackedMigrationReplay,
 } = {}) {
   let operationError;
   try {
     reset();
     const first = await verify();
+    verifyAuthPrecision();
     verifyMigrationReplay();
     reset();
     assertProbeRemoved();
@@ -728,6 +798,7 @@ if (require.main === module) {
 
 module.exports = {
   applyVersionedInputs,
+  authFixtureSnapshotQuery,
   assertAuthFixtureSnapshot,
   assertComposeConfiguration,
   assertExpectedVersions,
@@ -747,4 +818,5 @@ module.exports = {
   stopStack,
   validateLocalEnvironment,
   verifyAuthHealth,
+  verifyAuthTimestampPrecision,
 };

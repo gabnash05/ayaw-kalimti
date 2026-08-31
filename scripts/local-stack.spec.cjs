@@ -11,6 +11,7 @@ const {
 const path = require('node:path');
 const {
   applyVersionedInputs,
+  authFixtureSnapshotQuery,
   assertAuthFixtureSnapshot,
   assertComposeConfiguration,
   assertExpectedVersions,
@@ -30,6 +31,7 @@ const {
   stopStack,
   validateLocalEnvironment,
   verifyAuthHealth,
+  verifyAuthTimestampPrecision,
 } = require('./local-stack.cjs');
 
 describe('local stack command boundary', () => {
@@ -356,8 +358,19 @@ describe('exact local Auth fixture state', () => {
     pendingAuthArtifacts: 0,
     refreshTokens: 0,
     sessions: 0,
-    users: '2:dcf94ac8d325b23f593ebe6cb20cd30d',
+    users: '2:ecdaed87f250b598b10fb6189157d0b0',
   };
+
+  test('fingerprints timestamps with microsecond precision', () => {
+    const query = authFixtureSnapshotQuery();
+
+    expect(query).toContain(
+      "to_char(created_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS.US')",
+    );
+    expect(query).toContain(
+      "to_char(updated_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS.US')",
+    );
+  });
 
   test('accepts only the complete fixed non-login fixture snapshot', () => {
     expect(() => assertAuthFixtureSnapshot(expected)).not.toThrow();
@@ -385,6 +398,69 @@ describe('exact local Auth fixture state', () => {
   ])('rejects %s state', (_scenario, snapshot) => {
     expect(() => assertAuthFixtureSnapshot(snapshot)).toThrow(
       'The synthetic Auth fixture state is not exact.',
+    );
+  });
+
+  test('detects a one-microsecond mutation and restores the exact baseline', () => {
+    const mutate = jest.fn();
+    const query = jest
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error('The synthetic Auth fixture state is not exact.');
+      })
+      .mockReturnValueOnce(expected);
+    const restore = jest.fn();
+
+    expect(() =>
+      verifyAuthTimestampPrecision({ mutate, query, restore }),
+    ).not.toThrow();
+    expect(mutate).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(restore).toHaveBeenCalledTimes(1);
+  });
+
+  test('reports a sanitized verification-only failure after restoration', () => {
+    const restore = jest.fn();
+
+    expect(() =>
+      verifyAuthTimestampPrecision({
+        mutate: () => {
+          throw new Error('native mutation output');
+        },
+        query: jest.fn(),
+        restore,
+      }),
+    ).toThrow('Auth timestamp precision verification failed.');
+    expect(restore).toHaveBeenCalledTimes(1);
+  });
+
+  test('reports a sanitized restoration-only failure', () => {
+    expect(() =>
+      verifyAuthTimestampPrecision({
+        mutate: jest.fn(),
+        query: jest.fn(() => {
+          throw new Error('The synthetic Auth fixture state is not exact.');
+        }),
+        restore: () => {
+          throw new Error('native restoration output');
+        },
+      }),
+    ).toThrow('Auth timestamp precision fixture restoration failed.');
+  });
+
+  test('reports sanitized combined verification and restoration failure', () => {
+    expect(() =>
+      verifyAuthTimestampPrecision({
+        mutate: () => {
+          throw new Error('native mutation output');
+        },
+        query: jest.fn(),
+        restore: () => {
+          throw new Error('native restoration output');
+        },
+      }),
+    ).toThrow(
+      'Auth timestamp precision verification and restoration both failed.',
     );
   });
 });
@@ -472,6 +548,7 @@ describe('local integration cleanup', () => {
         cleanup: () => ({ error: new Error('spawn failed'), status: null }),
         reset: jest.fn(),
         verify: jest.fn().mockResolvedValue(snapshot),
+        verifyAuthPrecision: jest.fn(),
         verifyMigrationReplay: jest.fn(),
       }),
     ).rejects.toThrow('Local stack cleanup failed.');
