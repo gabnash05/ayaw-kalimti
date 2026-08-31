@@ -249,14 +249,16 @@ describe('local Auth readiness', () => {
 describe('exact local Auth fixture state', () => {
   const expected = {
     auditLogEntries: 0,
+    credentialedUsers: 0,
     flowState: 0,
     identities: 0,
     mfaChallenges: 0,
     mfaFactors: 0,
     oneTimeTokens: 0,
+    pendingAuthArtifacts: 0,
     refreshTokens: 0,
     sessions: 0,
-    users: '2:6730e56c630e37d43393c3d464e2c54d',
+    users: '2:dcf94ac8d325b23f593ebe6cb20cd30d',
   };
 
   test('accepts only the complete fixed non-login fixture snapshot', () => {
@@ -266,7 +268,18 @@ describe('exact local Auth fixture state', () => {
   test.each([
     ['missing fixture', { ...expected, users: '1:synthetic' }],
     ['changed fixture', { ...expected, users: '2:changed' }],
+    ['changed update timestamp', { ...expected, users: '2:changed-time' }],
+    ['changed application metadata', { ...expected, users: '2:changed-app' }],
+    ['changed user metadata', { ...expected, users: '2:changed-user' }],
     ['unexpected third user', { ...expected, users: '3:synthetic' }],
+    ['stored password', { ...expected, credentialedUsers: 1 }],
+    ['stored phone', { ...expected, credentialedUsers: 1 }],
+    ['confirmed or signed-in user', { ...expected, credentialedUsers: 1 }],
+    ['pending confirmation', { ...expected, pendingAuthArtifacts: 1 }],
+    ['pending recovery', { ...expected, pendingAuthArtifacts: 1 }],
+    ['pending email change', { ...expected, pendingAuthArtifacts: 1 }],
+    ['pending phone change', { ...expected, pendingAuthArtifacts: 1 }],
+    ['pending reauthentication', { ...expected, pendingAuthArtifacts: 1 }],
     ['residual identity', { ...expected, identities: 1 }],
     ['residual session', { ...expected, sessions: 1 }],
     ['residual refresh token', { ...expected, refreshTokens: 1 }],
